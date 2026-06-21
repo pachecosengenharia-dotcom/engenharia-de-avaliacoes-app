@@ -2,64 +2,44 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 st.set_page_config(layout="wide")
-st.title("📊 Engenharia de Avaliações - Modelo de Valor Unitário")
+st.title("📊 Engenharia de Avaliações - Goiânia")
 
 try:
-    # 1. Leitura
+    # 1. Leitura forçada
     df = pd.read_csv("Goiânia - GO.csv", sep=";", encoding='latin-1')
-    df.columns = [c.strip() for c in df.columns]
-
-    # 2. Definição explícita do alvo
-    # O sistema agora foca no Valor Unitário como dependente
-    col_alvo = 'Valor Unitário' 
     
-    # Função de limpeza para converter tudo em float
-    def limpar_num(val):
-        s = str(val).replace('R$', '').replace('.', '').replace(',', '.')
-        try: return float(s)
-        except: return np.nan
+    # 2. Limpeza brutal: transforma TUDO em numérico, o que for texto vira NaN
+    df_clean = pd.DataFrame()
+    col_alvo = 'Valor Unitário' # O alvo que você definiu
 
-    # 3. Processamento de dados
-    df_limpo = pd.DataFrame()
     for col in df.columns:
-        if col == col_alvo:
-            df_limpo[col] = df[col].apply(limpar_num)
-        elif df[col].dtype == 'object':
-            conv = df[col].apply(limpar_num)
-            if conv.notna().sum() > (len(df) * 0.7):
-                df_limpo[col] = conv
-        else:
-            df_limpo[col] = df[col]
+        # Remove caracteres indesejados, troca vírgula por ponto
+        col_str = df[col].astype(str).str.replace('R$', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+        # Força numérico
+        df_clean[col] = pd.to_numeric(col_str, errors='coerce')
 
-    df_limpo = df_limpo.dropna()
+    # 3. Remover linhas onde o alvo (Valor Unitário) ou os dados são nulos
+    df_clean = df_clean.dropna(subset=[col_alvo])
+    df_clean = df_clean.fillna(0) # Substitui o resto por 0 para não ter erro de None
+    
+    st.write(f"Linhas carregadas: {len(df_clean)}")
 
     # 4. Regressão
-    X = df_limpo.drop(columns=[col_alvo])
-    y = df_limpo[col_alvo]
+    y = df_clean[col_alvo]
+    X = df_clean.drop(columns=[col_alvo])
+    
     modelo = LinearRegression().fit(X, y)
-
+    
     # 5. Interface
-    st.sidebar.header("⚙️ Parâmetros do Imóvel")
+    st.sidebar.header("⚙️ Parâmetros")
     inputs = {}
     for col in X.columns:
-        inputs[col] = st.sidebar.number_input(f"{col}", value=float(df_limpo[col].median()))
-
-    # 6. Predição
+        inputs[col] = st.sidebar.number_input(f"{col}", value=float(X[col].median()))
+    
     pred = modelo.predict([list(inputs.values())])
     st.metric("Valor Unitário Estimado", f"R$ {pred[0]:,.2f} / m²")
 
-    # 7. Diagnóstico Visual
-    st.subheader("📈 Diagnóstico de Aderência")
-    y_pred = modelo.predict(X)
-    fig, ax = plt.subplots(figsize=(8, 4))
-    sns.regplot(x=y_pred, y=y, scatter_kws={'alpha':0.3}, line_kws={'color':'red'})
-    ax.set_xlabel("Estimado")
-    ax.set_ylabel("Real")
-    st.pyplot(fig)
-
 except Exception as e:
-    st.error(f"Erro na reconfiguração do modelo: {e}")
+    st.error(f"Erro Crítico: {e}")
