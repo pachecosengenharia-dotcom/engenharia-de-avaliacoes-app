@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.linear_model import Ridge
 import matplotlib.pyplot as plt
 import seaborn as sns
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
@@ -16,7 +16,7 @@ import unicodedata
 st.set_page_config(page_title="Engenharia de Avaliações", layout="wide")
 
 st.title("📊 Sistema Profissional de Engenharia de Avaliações")
-st.markdown("Selecione uma região salva no seu repositório ou insira uma nova planilha de mercado.")
+st.markdown("Modelagem estatística avançada e geração de laudos em conformidade com as diretrizes normativas.")
 
 # --- GERENCIAMENTO DE BANCO DE DADOS ---
 st.sidebar.header("📁 Base de Dados")
@@ -67,16 +67,14 @@ elif fonte_dados == "Fazer Upload Manual (.csv)":
 if df is not None:
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
     
-    # FUNÇÃO MÁGICA: Remove acentos e padroniza os nomes das colunas para evitar erros de leitura
     def remover_acentos(texto):
         return ''.join(c for c in unicodedata.normalize('NFD', str(texto)) if unicodedata.category(c) != 'Mn')
     
     df.columns = [remover_acentos(col).strip() for col in df.columns]
 
-    # Dicionário unificado SEM acentos para bater com a limpeza acima
     colunas_possiveis = {
-        'Preco': ['Preco', 'Preco', 'Valor', 'Vlr', 'PRECO', 'Valor Total', 'Valor_Total'],
-        'Area_Construida': ['Area_Construida', 'Area_Construida', 'Area Construida', 'Area Const', 'Area Privativa', 'Area Privativa'],
+        'Preco': ['Preco', 'Valor', 'Vlr', 'PRECO', 'Valor Total', 'Valor_Total'],
+        'Area_Construida': ['Area_Construida', 'Area Construida', 'Area Const', 'Area Privativa'],
         'Area_Terreno': ['Area_Terreno', 'Area Terreno', 'Terreno', 'AREA_TERRENO', 'Area do Terreno'],
         'Quartos': ['Quartos', 'Dormitorios', 'QUARTOS'],
         'Suites': ['Suites', 'SUITES', 'Suite', 'SUITE'],
@@ -94,22 +92,19 @@ if df is not None:
                 df = df.rename(columns={col: padrao})
 
     if 'Preco' not in df.columns or 'Area_Construida' not in df.columns:
-        st.error(f"Não mapeamos as colunas essenciais (Preço e Área). Cabeçalhos atuais limpos: {list(df.columns)}")
+        st.error(f"Não mapeamos as colunas essenciais. Cabeçalhos atuais limpos: {list(df.columns)}")
     else:
         todas_vars = ['Area_Construida', 'Area_Terreno', 'Quartos', 'Suites', 'Vagas', 'Conservacao', 'Padrao_Acabamento', 'Setor_Urbano', 'Data_Evento', 'Evento']
         variaveis_independentes = [v for v in todas_vars if v in df.columns]
 
-        # Limpeza numérica precisa
         def limpar_para_numero_puro(valor):
             txt = str(valor).strip().replace('R$', '').replace(' ', '')
             if not txt or txt.lower() in ['nan', 'null', '']: return np.nan
-            
             if ',' in txt and '.' in txt:
                 if txt.find('.') < txt.find(','): txt = txt.replace('.', '')
                 else: txt = txt.replace(',', '')
             if ',' in txt and '.' not in txt:
                 txt = txt.replace(',', '.')
-                
             txt = re.sub(r'[^\d.]', '', txt)
             try: return float(txt)
             except: return np.nan
@@ -121,94 +116,166 @@ if df is not None:
 
         df = df.dropna(subset=['Preco', 'Area_Construida'])
 
-        # Painel de Controle Lateral Dinâmico
+        # Painel Lateral
         st.sidebar.header("⚙️ Características do Imóvel")
         caracteristicas_avaliando = {}
         
-        if 'Area_Construida' in variaveis_independentes:
-            caracteristicas_avaliando['Area_Construida'] = st.sidebar.number_input("Área Construída (m²)", value=120.0, step=1.0)
-        if 'Area_Terreno' in variaveis_independentes:
-            caracteristicas_avaliando['Area_Terreno'] = st.sidebar.number_input("Área do Terreno (m²)", value=360.0, step=1.0)
-        if 'Quartos' in variaveis_independentes:
-            caracteristicas_avaliando['Quartos'] = st.sidebar.slider("Quantidade de Quartos", 1, 5, 3)
-        if 'Suites' in variaveis_independentes:
-            caracteristicas_avaliando['Suites'] = st.sidebar.slider("Quantidade de Suítes", 0, 5, 1)
-        if 'Vagas' in variaveis_independentes:
-            caracteristicas_avaliando['Vagas'] = st.sidebar.slider("Vagas de Garagem", 0, 5, 2)
-        if 'Conservacao' in variaveis_independentes:
-            caracteristicas_avaliando['Conservacao'] = st.sidebar.selectbox("Estado de Conservação", [1, 2, 3], index=1, format_func=lambda x: {1:"Regular", 2:"Bom", 3:"Excelente"}[x])
-        if 'Padrao_Acabamento' in variaveis_independentes:
-            caracteristicas_avaliando['Padrao_Acabamento'] = st.sidebar.selectbox("Padrão de Acabamento", [1, 2, 3], index=1, format_func=lambda x: {1:"Baixo", 2:"Médio", 3:"Alto"}[x])
-        
-        if 'Setor_Urbano' in variaveis_independentes:
-            valor_inicial = float(df['Setor_Urbano'].median()) if len(df) > 0 else 500.0
-            caracteristicas_avaliando['Setor_Urbano'] = st.sidebar.number_input("Setor_Urbano", min_value=0.0, max_value=5000.0, value=valor_inicial, step=10.0)
-            
-        if 'Data_Evento' in variaveis_independentes:
-            try:
-                valor_data_inicial = float(df['Data_Evento'].median())
-                if np.isnan(valor_data_inicial): valor_data_inicial = 1.0
-            except:
-                valor_data_inicial = 1.0
-            caracteristicas_avaliando['Data_Evento'] = st.sidebar.number_input("Data do Evento", value=valor_data_inicial, step=1.0)
-            
-        if 'Evento' in variaveis_independentes:
-            caracteristicas_avaliando['Evento'] = st.sidebar.number_input("Fator de Evento", value=1.0, step=0.05)
+        for var in variaveis_independentes:
+            if var == 'Area_Construida':
+                caracteristicas_avaliando[var] = st.sidebar.number_input("Área Construída (m²)", value=120.0, step=1.0)
+            elif var == 'Area_Terreno':
+                caracteristicas_avaliando[var] = st.sidebar.number_input("Área do Terreno (m²)", value=360.0, step=1.0)
+            elif var in ['Quartos', 'Suites', 'Vagas']:
+                caracteristicas_avaliando[var] = st.sidebar.slider(f"Quantidade de {var}", 0, 5, 2 if var != 'Quartos' else 3)
+            elif var in ['Conservacao', 'Padrao_Acabamento']:
+                label = "Estado de Conservação" if var == 'Conservacao' else "Padrão de Acabamento"
+                caracteristicas_avaliando[var] = st.sidebar.selectbox(label, [1, 2, 3], index=1, format_func=lambda x: {1:"Baixo/Regular", 2:"Médio/Bom", 3:"Alto/Excelente"}[x])
+            elif var == 'Setor_Urbano':
+                valor_inicial = float(df['Setor_Urbano'].median()) if len(df) > 0 else 500.0
+                caracteristicas_avaliando[var] = st.sidebar.number_input("Setor Urbano (Fator)", min_value=0.0, max_value=5000.0, value=valor_inicial, step=10.0)
+            elif var == 'Data_Evento':
+                valor_data = float(df['Data_Evento'].median()) if len(df) > 0 else 1.0
+                caracteristicas_avaliando[var] = st.sidebar.number_input("Data do Evento (Mês/Fator)", value=valor_data, step=1.0)
+            elif var == 'Evento':
+                caracteristicas_avaliando[var] = st.sidebar.number_input("Fator de Evento (Venda=1.0)", value=1.0, step=0.05)
 
-        if len(df) >= 2:
+        if len(df) >= len(variaveis_independentes) + 2:
             X = df[variaveis_independentes]
             y = df['Preco']
             
+            # Ajuste do Modelo
             modelo = Ridge(alpha=1.0).fit(X.values, y.values)
             
+            # Predições e Diagnósticos
+            y_pred_todo = modelo.predict(X.values)
             dados_imovel_lista = [caracteristicas_avaliando[var] for var in X.columns]
-            dados_imovel = np.array([dados_imovel_lista])
-            
-            preco_estimado = max(0, modelo.predict(dados_imovel)[0])
+            preco_estimado = max(0, modelo.predict(np.array([dados_imovel_lista]))[0])
             r2_score = modelo.score(X.values, y.values)
+            
             limite_inferior, limite_superior = preco_estimado * 0.85, preco_estimado * 1.15
 
-            # Resultados
+            # Cálculo Simplificado da Distância de Cook para identificação de outliers
+            residuos = y.values - y_pred_todo
+            mse = np.mean(residuos ** 2)
+            # Alavancagem aproximada para matrizes estáveis
+            leverage = np.ones(len(df)) * (len(variaveis_independentes) / len(df))
+            distancia_cook = (residuos ** 2 / (len(variaveis_independentes) * mse)) * (leverage / (1 - leverage) ** 2)
+            corte_cook = 4 / len(df)
+
+            # --- APRESENTAÇÃO NO DASHBOARD ---
             c1, c2, c3 = st.columns(3)
             c1.metric("Valor de Mercado Estimado", f"R$ {preco_estimado:,.2f}")
             c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
-            c3.metric("Precisão do Modelo (R²)", f"{f'{r2_score*100:.2f}%' if r2_score > 0 else 'N/A'}")
+            c3.metric("Precisão do Modelo (R²)", f"{r2_score*100:.2f}%")
 
-            st.info(f"📐 **Variáveis processadas no cálculo multifatorial:** {', '.join(X.columns)}")
+            # Construção Estrita da Equação Matemática
+            termos_equacao = [f"({modelo.intercept_:+,.2f})"]
+            for var, coef in zip(X.columns, modelo.coef_):
+                termos_equacao.append(f"({coef:+,.4f} × {var})")
+            equacao_texto = "Preço = " + " ".join(termos_equacao)
+            
+            st.info(f"⚙️ **Equação de Regressão Gerada:** \n`{equacao_texto}`")
 
-            # Gráfico de Dispersão
-            fig, ax = plt.subplots(figsize=(8, 3.5))
-            sns.scatterplot(data=df, x='Area_Construida', y='Preco', color='#002d62', alpha=0.6, ax=ax, label="Amostras de Mercado")
-            ax.scatter([caracteristicas_avaliando['Area_Construida']], [preco_estimado], color='#d9534f', s=150, marker='*', label="Imóvel Avaliando")
-            ax.set_title("Gráfico de Dispersão - Engenharia de Avaliações")
-            ax.grid(True, alpha=0.3)
+            # --- GERAÇÃO DOS GRÁFICOS (MATRIZ DE DIAGNÓSTICO) ---
+            fig, axs = plt.subplots(2, 2, figsize=(11, 7.5))
+            plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+
+            # 1. Dispersão Tradicional (Área vs Preço)
+            sns.scatterplot(data=df, x='Area_Construida', y='Preco', color='#002d62', alpha=0.5, ax=axs[0,0], label="Amostras")
+            axs[0,0].scatter([caracteristicas_avaliando['Area_Construida']], [preco_estimado], color='#d9534f', s=120, marker='*', label="Avaliando")
+            axs[0,0].set_title("Dispersão: Preço vs Área", fontsize=10, weight='bold', color='#002d62')
+            axs[0,0].legend(fontsize=8)
+
+            # 2. Gráfico de Aderência (Real vs Estimado)
+            axs[0,1].scatter(y.values, y_pred_todo, color='#002d62', alpha=0.5)
+            axs[0,1].plot([y.min(), y.max()], [y.min(), y.max()], 'r--', lw=1.5, label="Aderência Ideal")
+            axs[0,1].set_title("Gráfico de Aderência (Real vs Estimado)", fontsize=10, weight='bold', color='#002d62')
+            axs[0,1].set_xlabel("Preço Real")
+            axs[0,1].set_ylabel("Preço Estimado")
+            axs[0,1].legend(fontsize=8)
+
+            # 3. Distância de Cook
+            axs[1,0].stem(np.arange(len(distancia_cook)), distancia_cook, markerfmt=' ', linefmt='#002d62')
+            axs[1,0].axhline(corte_cook, color='#d9534f', linestyle='--', lw=1.5, label="Limite (4/n)")
+            axs[1,0].set_title("Distância de Cook (Identificação de Outliers)", fontsize=10, weight='bold', color='#002d62')
+            axs[1,0].legend(fontsize=8)
+
+            # 4. Histograma dos Resíduos
+            sns.histplot(residuos, kde=True, color='#002d62', ax=axs[1,1], alpha=0.4)
+            axs[1,1].set_title("Distribuição dos Resíduos (Normalidade)", fontsize=10, weight='bold', color='#002d62')
+
+            plt.tight_layout()
             st.pyplot(fig)
 
-            # PDF
+            # --- ESTRUTURAÇÃO DO RELATÓRIO PDF PROFISSIONAL ---
             img_buf = io.BytesIO()
-            fig.savefig(img_buf, format='png', dpi=200)
+            fig.savefig(img_buf, format='png', dpi=250)
             img_buf.seek(0)
             
             pdf_buf = io.BytesIO()
-            doc = SimpleDocTemplate(pdf_buf, pagesize=letter)
+            doc = SimpleDocTemplate(pdf_buf, pagesize=letter, leftMargin=40, rightMargin=40, topMargin=40, bottomMargin=40)
             styles = getSampleStyleSheet()
             
-            detalhes_texto = " | ".join([f"<b>{k}:</b> {v}" for k, v in caracteristicas_avaliando.items()])
+            # Estilização Minimalista Luxury para o Engenheiro Consultor
+            style_titulo = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=16, textColor=colors.HexColor('#002d62'), spaceAfter=15, alignment=1)
+            style_secao = ParagraphStyle('SecaoStyle', parent=styles['Heading2'], fontSize=11, textColor=colors.HexColor('#002d62'), spaceBefore=12, spaceAfter=6, borderPadding=2)
+            style_texto = ParagraphStyle('TextoStyle', parent=styles['Normal'], fontSize=9, leading=13, textColor=colors.HexColor('#333333'))
+            style_code = ParagraphStyle('CodeStyle', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=colors.HexColor('#555555'), fontName='Courier')
+
+            # Montagem da Tabela de Características
+            dados_tabela = [["Variável Independente", "Valor Configurado para o Imóvel Avaliando"]]
+            for k, v in caracteristicas_avaliando.items():
+                dados_tabela.append([str(k), f"{v:,.2f}" if isinstance(v, (int, float)) else str(v)])
+            
+            tabela_carac = Table(dados_tabela, colWidths=[200, 250])
+            tabela_carac.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (1,0), colors.HexColor('#002d62')),
+                ('TEXTCOLOR', (0,0), (1,0), colors.white),
+                ('FONTNAME', (0,0), (1,0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0,0), (-1,-1), 9),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
+                ('TOPPADDING', (0,0), (-1,-1), 4),
+                ('ALIGN', (1,0), (1,-1), 'RIGHT'),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#dddddd')),
+                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f9f9f9')])
+            ]))
+
             story = [
-                Paragraph("LAUDO DE AVALIAÇÃO TÉCNICA MERCADOLÓGICA", ParagraphStyle('T', fontSize=18, textColor=colors.HexColor('#002d62'), alignment=1)),
+                Paragraph("LAUDO DE AVALIAÇÃO TÉCNICA MERCADOLÓGICA", style_titulo),
+                Paragraph("<b>Engenharia Olfativa & Avaliações Estruturais</b>", ParagraphStyle('Sub', parent=style_texto, alignment=1)),
                 Spacer(1, 15),
-                Paragraph(detalhes_texto, styles['Normal']),
+                
+                Paragraph("1. DIAGNÓSTICO DO IMÓVEL AVALIANDO", style_secao),
+                Paragraph("Abaixo estão tabeladas as características intrínsecas e extrínsecas definidas para o cálculo do modelo de regressão linear:", style_texto),
                 Spacer(1, 5),
-                Paragraph(f"<b>Valor de Mercado Inferido: R$ {preco_estimado:,.2f}</b>", styles['Normal']),
-                Spacer(1, 15),
-                Image(img_buf, width=400, height=180)
+                tabela_carac,
+                Spacer(1, 12),
+                
+                Paragraph("2. RESULTADOS DO MODELO MULTIFATORIAL", style_secao),
+                Paragraph(f"<b>Valor de Mercado Estimado:</b> R$ {preco_estimado:,.2f}", style_texto),
+                Paragraph(f"<b>Limite Inferior Admissível (85%):</b> R$ {limite_inferior:,.2f}", style_texto),
+                Paragraph(f"<b>Limite Superior Admissível (115%):</b> R$ {limite_superior:,.2f}", style_texto),
+                Paragraph(f"<b>Grau de Ajuste Estatístico (R²):</b> {r2_score*100:.2f}%", style_texto),
+                Spacer(1, 8),
+                
+                Paragraph("3. EQUAÇÃO MATEMÁTICA DA REGRESSÃO", style_secao),
+                Paragraph("A equação abaixo determina a formação de preço obtida pelo treinamento das amostras reais colhidas:", style_texto),
+                Spacer(1, 4),
+                Paragraph(f"{equacao_texto}", style_code),
+                Spacer(1, 12),
+                
+                Paragraph("4. MATRIZ DE DIAGNÓSTICOS GRÁFICOS (ANEXO NBR 14653)", style_secao),
+                Image(img_buf, width=480, height=320),
+                Spacer(1, 10),
+                Paragraph("<font size=7 color='#777777'>Relatório emitido automaticamente via plataforma de Engenharia de Avaliações.</font>", style_texto)
             ]
+            
             doc.build(story)
             pdf_buf.seek(0)
 
             st.sidebar.markdown("---")
-            st.sidebar.download_button(label="📥 Baixar Laudo Oficial (PDF)", data=pdf_buf, file_name="Laudo_Tecnico_Profissional.pdf", mime="application/pdf")
+            st.sidebar.download_button(label="📥 Baixar Laudo Avançado (PDF)", data=pdf_buf, file_name="Laudo_Tecnico_Avancado.pdf", mime="application/pdf")
         else:
-            st.warning(f"⚠️ Amostras insuficientes após tratamento. Linhas válidas: {len(df)}.")
+            st.warning(f"⚠️ Amostras insuficientes para gerar a matriz de diagnóstico. Linhas válidas: {len(df)}.")
 else:
     st.info("💡 Escolha uma região salva no menu lateral ou selecione a opção de upload manual para começar.")
