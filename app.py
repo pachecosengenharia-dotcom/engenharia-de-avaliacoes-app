@@ -111,4 +111,102 @@ if df is not None:
             try: return float(txt)
             except: return np.nan
 
-        df['Preco'] = df['Preco'].apply(
+        df['Preco'] = df['Preco'].apply(limpar_para_numero_puro)
+        for col in variaveis_independentes:
+            df[col] = df[col].apply(limpar_para_numero_puro)
+            df[col] = df[col].fillna(df[col].median() if not df[col].isnull().all() else 1.0)
+
+        df = df.dropna(subset=['Preco', 'Area_Construida'])
+
+        # Painel Lateral
+        st.sidebar.header("⚙️ Características do Imóvel")
+        caracteristicas_avaliando = {}
+        
+        for var in variaveis_independentes:
+            if var == 'Area_Construida':
+                caracteristicas_avaliando[var] = st.sidebar.number_input("Área Construída (m²)", value=120.0, step=1.0)
+            elif var == 'Area_Terreno':
+                caracteristicas_avaliando[var] = st.sidebar.number_input("Área do Terreno (m²)", value=360.0, step=1.0)
+            elif var in ['Quartos', 'Suites', 'Vagas']:
+                label_nome = "Quartos" if var == 'Quartos' else ("Suítes" if var == 'Suites' else "Vagas de Garagem")
+                caracteristicas_avaliando[var] = st.sidebar.slider(f"Quantidade de {label_nome}", 0, 5, 1 if var != 'Quartos' else 3)
+            elif var in ['Conservacao', 'Padrao_Acabamento']:
+                label = "Estado de Conservação" if var == 'Conservacao' else "Padrão de Acabamento"
+                caracteristicas_avaliando[var] = st.sidebar.selectbox(label, [1, 2, 3], index=1, format_func=lambda x: {1:"Baixo/Regular", 2:"Médio/Bom", 3:"Alto/Excelente"}[x])
+            elif var == 'Setor_Urbano':
+                valor_inicial = float(df['Setor_Urbano'].median()) if len(df) > 0 else 500.0
+                caracteristicas_avaliando[var] = st.sidebar.number_input("Setor Urbano (Fator)", min_value=0.0, max_value=5000.0, value=valor_inicial, step=10.0)
+            elif var == 'Data_Evento':
+                valor_data = float(df['Data_Evento'].median()) if len(df) > 0 else 1.0
+                caracteristicas_avaliando[var] = st.sidebar.number_input("Data do Evento (Mês/Fator)", value=valor_data, step=1.0)
+            elif var == 'Evento':
+                caracteristicas_avaliando[var] = st.sidebar.number_input("Fator de Evento", value=1.0, step=0.05)
+            elif var == 'Idade_Aparent':
+                caracteristicas_avaliando[var] = st.sidebar.number_input("Idade Aparente (Anos)", value=10.0, step=1.0)
+
+        if len(df) >= len(variaveis_independentes) + 2:
+            X = df[variaveis_independentes]
+            y = df['Preco']
+            
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X.values)
+            
+            modelo = LinearRegression().fit(X_scaled, y.values)
+            
+            y_pred_todo = modelo.predict(X_scaled)
+            dados_imovel_lista = [caracteristicas_avaliando[var] for var in X.columns]
+            dados_imovel_scaled = scaler.transform(np.array([dados_imovel_lista]))
+            
+            preco_estimado = max(0, modelo.predict(dados_imovel_scaled)[0])
+            r2_score = modelo.score(X_scaled, y.values)
+            
+            limite_inferior, limite_superior = preco_estimado * 0.85, preco_estimado * 1.15
+
+            # Diagnósticos de Cook e Resíduos
+            residuos = y.values - y_pred_todo
+            mse = np.mean(residuos ** 2) if np.mean(residuos ** 2) > 0 else 1.0
+            leverage = np.ones(len(df)) * (len(variaveis_independentes) / len(df))
+            distancia_cook = (residuos ** 2 / (len(variaveis_independentes) * mse)) * (leverage / (1 - leverage) ** 2)
+            corte_cook = 4 / len(df)
+
+            # Apresentação na Tela
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Valor de Mercado Estimado", f"R$ {preco_estimado:,.2f}")
+            c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
+            c3.metric("Precisão do Modelo (R²)", f"{r2_score*100:.2f}%")
+
+            # RECONSTRUÇÃO LIMPA DA EQUAÇÃO MATEMÁTICA (Sem dízimas científicas ou poluição visual)
+            coef_originais = modelo.coef_ / scaler.scale_
+            intercept_original = modelo.intercept_ - np.sum(modelo.coef_ * scaler.mean_ / scaler.scale_)
+            
+            equacao_texto = f"Preço = {intercept_original:,.2f}"
+            for var, coef in zip(X.columns, coef_originais):
+                sinal = "+" if coef >= 0 else "-"
+                equacao_texto += f" {sinal} {abs(coef):,.2f} × {var}"
+            
+            st.info(f"📐 **Equação de Regressão Linear Múltipla:** \n`{equacao_texto}`")
+
+            # --- MATRIZ DE DIAGNÓSTICOS GRÁFICOS ---
+            fig, axs = plt.subplots(2, 2, figsize=(11, 7.5))
+            plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+
+            # 1. Dispersão Real
+            axs[0,0].scatter(df['Area_Construida'].values, df['Preco'].values, color='#002d62', alpha=0.5, label="Amostras")
+            axs[0,0].scatter([caracteristicas_avaliando['Area_Construida']], [preco_estimado], color='#d9534f', s=130, marker='*', zorder=5, label="Avaliando")
+            axs[0,0].set_title("Dispersão: Preço vs Área", fontsize=10, weight='bold', color='#002d62')
+            axs[0,0].set_xlabel("Área Construída (m²)")
+            axs[0,0].set_ylabel("Preço (R$)")
+            axs[0,0].legend(fontsize=8)
+
+            # 2. Aderência Real
+            axs[0,1].scatter(y.values, y_pred_todo, color='#002d62', alpha=0.5)
+            axs[0,1].plot([y.min(), y.max()], [y.min(), y.max()], 'r--', lw=1.5, label="Aderência Ideal")
+            axs[0,1].set_title("Gráfico de Aderência (Real vs Estimado)", fontsize=10, weight='bold', color='#002d62')
+            axs[0,1].set_xlabel("Preço Real (R$)")
+            axs[0,1].set_ylabel("Preço Estimado (R$)")
+            axs[0,1].legend(fontsize=8)
+
+            # 3. Cook
+            axs[1,0].stem(np.arange(len(distancia_cook)), distancia_cook, markerfmt=' ', linefmt='#002d62')
+            axs[1,0].axhline(corte_cook, color='#d9534f', linestyle='--', lw=1.5, label="Limite (4/n)")
+            axs[1,0].set_title("Distância de
