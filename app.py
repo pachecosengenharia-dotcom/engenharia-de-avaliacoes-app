@@ -16,11 +16,12 @@ if arquivo_csv is not None:
     # 2. Definição explícita das colunas que são números
     # Estas são as colunas que estão exatamente no seu CSV
     # 2. Definição explícita das colunas que são números
+  # 2. Definição explícita das colunas que são números
     cols_numericas = [
         'Área Privativa', 'Área do Terreno', 'Quartos', 'Evento', 
         'Padrão de Acabamento', 'Suite', 'Estado de Conservação', 
-        'Idade Aparente', 'Setor urbano', 'Data do Evento' 
-        # 'Valor Total' foi removido desta lista propositalmente
+        'Idade Aparente', 'Setor urbano', 'Data do Evento'
+        # 'Valor Total' foi removido propositalmente daqui
     ]
     col_alvo = 'Valor Unitário'
     
