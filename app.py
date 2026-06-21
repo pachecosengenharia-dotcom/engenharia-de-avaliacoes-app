@@ -6,70 +6,60 @@ import matplotlib.pyplot as plt
 
 # --- Configuração ---
 st.set_page_config(layout="wide")
-st.title("📊 AVM - Engenharia de Avaliações")
+st.title("📊 AVM - Engenharia de Avaliações (NBR 14653)")
 
 arquivo_csv = st.sidebar.file_uploader("Carregar Base de Dados (CSV)", type="csv")
 
 if arquivo_csv is not None:
-    # 1. Leitura e Limpeza
     df = pd.read_csv(arquivo_csv, sep=";", encoding='latin-1')
     features_list = ['Área Privativa', 'Área do Terreno', 'Quartos', 'Evento', 
                      'Padrão de Acabamento', 'Suite', 'Estado de Conservação', 
                      'Idade Aparente', 'Setor urbano', 'Data do Evento']
     col_alvo = 'Valor Unitário'
     
+    # Limpeza
     df_clean = pd.DataFrame()
     for col in features_list + [col_alvo]:
         if col in df.columns:
-            df_clean[col] = df[col].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
-            df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
+            df_clean[col] = pd.to_numeric(df[col].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce')
     df_clean = df_clean.dropna()
 
     if not df_clean.empty:
-        X = df_clean[features_list]
-        y = df_clean[col_alvo]
-        modelo = LinearRegression().fit(X, y)
+        modelo = LinearRegression().fit(df_clean[features_list], df_clean[col_alvo])
         
-        # --- EXIBIÇÃO DA EQUAÇÃO ---
-        eq_str = f"V.U. = {modelo.intercept_:.2f} " + " ".join([f"+ ({c:.2f}*{n})" for n, c in zip(features_list, modelo.coef_)])
-        st.subheader("Equação do Modelo")
-        st.latex(eq_str)
-        
-        # --- CÁLCULOS PARA GRÁFICOS ---
-        predicoes = modelo.predict(X)
-        residuos = y - predicoes
-        
-        # Distância de Cook (cálculo simplificado)
-        n, p = len(y), len(features_list) + 1
-        X_mat = np.column_stack([np.ones(n), X])
-        leverage = np.diag(X_mat @ np.linalg.inv(X_mat.T @ X_mat) @ X_mat.T)
-        cooks_dist = (residuos**2 / (p * np.var(residuos))) * (leverage / (1 - leverage)**2)
-        
-        # --- EXIBIÇÃO DOS GRÁFICOS ---
-        st.subheader("Diagnóstico do Modelo")
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
-        
-        ax1.scatter(y, predicoes, alpha=0.5); ax1.set_title("Aderência (Obs vs Prev)")
-        ax2.scatter(predicoes, residuos, alpha=0.5, color='orange'); ax2.axhline(0, color='black', linestyle='--'); ax2.set_title("Resíduos")
-        ax3.stem(cooks_dist); ax3.set_title("Distância de Cook")
-        
-        st.pyplot(fig)
-        
-        # --- CÁLCULOS E METRICAS DE AVALIAÇÃO ---
+        # --- INPUTS COM VALIDAÇÃO DE LIMITES ---
         st.sidebar.header("⚙️ Parâmetros do Imóvel")
-        inputs = {f: st.sidebar.number_input(f, value=float(df_clean[f].median())) for f in features_list}
+        inputs = {}
+        extrapolou = False
+        
+        for f in features_list:
+            min_val, max_val = df_clean[f].min(), df_clean[f].max()
+            val = st.sidebar.number_input(f"{f} (Limites: {min_val:.1f} a {max_val:.1f})", 
+                                          value=float(df_clean[f].median()))
+            inputs[f] = val
+            
+            # Verificação de extrapolação conforme NBR 14653
+            if val < min_val or val > max_val:
+                st.sidebar.warning(f"⚠️ Extrapolação em {f}!")
+                extrapolou = True
         
         if st.sidebar.button("Calcular Precificação"):
-            pred_unit = modelo.predict(np.array([list(inputs.values())]))[0]
-            erro_padrao = np.std(residuos)
-            
-            area = inputs.get('Área Privativa', 1)
-            
-            st.subheader("Resultados")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("V.U. Mínimo", f"R$ {pred_unit - (1.96 * erro_padrao):,.2f}")
-            col2.metric("V.U. Médio", f"R$ {pred_unit:,.2f}")
-            col3.metric("V.U. Máximo", f"R$ {pred_unit + (1.96 * erro_padrao):,.2f}")
-            st.metric("Valor Total Estimado", f"R$ {pred_unit * area:,.2f}")
+            if extrapolou:
+                st.error("Atenção: O modelo não pode ser utilizado com segurança, pois existem variáveis fora dos limites amostrais da NBR 14653.")
+            else:
+                # Predição
+                input_array = np.array([inputs[f] for f in features_list]).reshape(1, -1)
+                pred_unit = modelo.predict(input_array)[0]
+                
+                # Intervalo e Total
+                residuos = df_clean[col_alvo] - modelo.predict(df_clean[features_list])
+                erro_padrao = np.std(residuos)
+                area = inputs.get('Área Privativa', 1)
+                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("V.U. Mínimo", f"R$ {pred_unit - (1.96 * erro_padrao):,.2f}")
+                col2.metric("V.U. Médio", f"R$ {pred_unit:,.2f}")
+                col3.metric("V.U. Máximo", f"R$ {pred_unit + (1.96 * erro_padrao):,.2f}")
+                st.write(f"### Valor Total Estimado: R$ {pred_unit * area:,.2f}")
     else:
-        st.error("Erro nos dados.")
+        st.error("Erro na leitura dos dados.")
