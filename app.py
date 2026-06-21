@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import seaborn as sns
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
@@ -93,11 +94,9 @@ if df is not None:
             if col in sinonimos:
                 df = df.rename(columns={col: padrao})
 
-    # Verificação básica de pilares para Engenharia de Avaliações
     if 'Preco' not in df.columns or 'Area_Construida' not in df.columns:
         st.error(f"Não conseguimos mapear as colunas essenciais de Preço e Área nesta planilha. Cabeçalhos atuais: {list(df.columns)}")
     else:
-        # CRUCIAL: O sistema avalia quais variáveis de fato existem na planilha selecionada
         todas_vars_possiveis = ['Area_Construida', 'Area_Terreno', 'Quartos', 'Suites', 'Vagas', 'Conservacao', 'Padrao_Acabamento', 'Setor_Urbano', 'Data_Evento', 'Evento', 'Idade_Aparent']
         variaveis_independentes = [v for v in todas_vars_possiveis if v in df.columns]
 
@@ -120,7 +119,7 @@ if df is not None:
 
         df = df.dropna(subset=['Preco', 'Area_Construida'])
 
-        # Painel Lateral Dinâmico (Monta apenas os campos que a planilha atual possui)
+        # Painel Lateral Dinâmico
         st.sidebar.header("⚙️ Características do Imóvel")
         caracteristicas_avaliando = {}
         
@@ -146,23 +145,29 @@ if df is not None:
             elif var == 'Idade_Aparent':
                 caracteristicas_avaliando[var] = st.sidebar.number_input("Idade Aparente (Anos)", value=10.0, step=1.0)
 
-        # Treinamento dinâmico baseado no número de colunas encontradas
         if len(df) >= len(variaveis_independentes) + 2:
             X = df[variaveis_independentes]
             y = df['Preco']
             
-            modelo = Ridge(alpha=1.0).fit(X.values, y.values)
+            # ESCALONAMENTO DE VARIÁVEIS: Crucial para estabilizar a matemática multifatorial
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X.values)
             
-            y_pred_todo = modelo.predict(X.values)
+            # Uso de Regressão Linear Pura sobre dados escalonados para precisão total
+            modelo = LinearRegression().fit(X_scaled, y.values)
+            
+            y_pred_todo = modelo.predict(X_scaled)
             dados_imovel_lista = [caracteristicas_avaliando[var] for var in X.columns]
-            preco_estimado = max(0, modelo.predict(np.array([dados_imovel_lista]))[0])
-            r2_score = modelo.score(X.values, y.values)
+            dados_imovel_scaled = scaler.transform(np.array([dados_imovel_lista]))
+            
+            preco_estimado = max(0, modelo.predict(dados_imovel_scaled)[0])
+            r2_score = modelo.score(X_scaled, y.values)
             
             limite_inferior, limite_superior = preco_estimado * 0.85, preco_estimado * 1.15
 
-            # Diagnóstico de Cook e Aderência
+            # Diagnósticos de Cook e Resíduos
             residuos = y.values - y_pred_todo
-            mse = np.mean(residuos ** 2)
+            mse = np.mean(residuos ** 2) if np.mean(residuos ** 2) > 0 else 1.0
             leverage = np.ones(len(df)) * (len(variaveis_independentes) / len(df))
             distancia_cook = (residuos ** 2 / (len(variaveis_independentes) * mse)) * (leverage / (1 - leverage) ** 2)
             corte_cook = 4 / len(df)
@@ -173,13 +178,16 @@ if df is not None:
             c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
             c3.metric("Precisão do Modelo (R²)", f"{r2_score*100:.2f}%")
 
-            # Montagem dinâmica da equação baseada apenas nas colunas ativas
-            termos_equacao = [f"({modelo.intercept_:+,.2f})"]
-            for var, coef in zip(X.columns, modelo.coef_):
+            # Reconstrução dos coeficientes originais (não escalonados) para exibição estrita da equação
+            coef_originais = modelo.coef_ / scaler.scale_
+            intercept_original = modelo.intercept_ - np.sum(modelo.coef_ * scaler.mean_ / scaler.scale_)
+            
+            termos_equacao = [f"({intercept_original:+,.2f})"]
+            for var, coef in zip(X.columns, coef_originais):
                 termos_equacao.append(f"({coef:+,.4f} × {var})")
             equacao_texto = "Preço = " + " ".join(termos_equacao)
             
-            st.info(f"📐 **Equação adaptativa para esta planilha:** \n`{equacao_texto}`")
+            st.info(f"📐 **Equação adaptativa unificada:** \n`{equacao_texto}`")
 
             # --- MATRIZ DE DIAGNÓSTICOS GRÁFICOS ---
             fig, axs = plt.subplots(2, 2, figsize=(11, 7.5))
@@ -220,60 +228,4 @@ if df is not None:
             styles = getSampleStyleSheet()
             
             style_titulo = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=16, textColor=colors.HexColor('#002d62'), spaceAfter=15, alignment=1)
-            style_secao = ParagraphStyle('SecaoStyle', parent=styles['Heading2'], fontSize=11, textColor=colors.HexColor('#002d62'), spaceBefore=12, spaceAfter=6)
-            style_texto = ParagraphStyle('TextoStyle', parent=styles['Normal'], fontSize=9, leading=13, textColor=colors.HexColor('#333333'))
-            style_code = ParagraphStyle('CodeStyle', parent=styles['Normal'], fontSize=7.5, leading=10, textColor=colors.HexColor('#555555'), fontName='Courier')
-
-            dados_tabela = [["Variável Independente Ativa", "Valor Configurado"]]
-            for k, v in caracteristicas_avaliando.items():
-                dados_tabela.append([str(k), f"{v:,.2f}" if isinstance(v, (int, float)) else str(v)])
-            
-            tabela_carac = Table(dados_tabela, colWidths=[200, 250])
-            tabela_carac.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (1,0), colors.HexColor('#002d62')),
-                ('TEXTCOLOR', (0,0), (1,0), colors.white),
-                ('FONTNAME', (0,0), (1,0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0,0), (-1,-1), 9),
-                ('BOTTOMPADDING', (0,0), (-1,-1), 4),
-                ('TOPPADDING', (0,0), (-1,-1), 4),
-                ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#dddddd')),
-                ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f9f9f9')])
-            ]))
-
-            story = [
-                Paragraph("LAUDO DE AVALIAÇÃO TÉCNICA MERCADOLÓGICA", style_titulo),
-                Paragraph("<b>Modelagem Estatística Multifatorial Adaptativa</b>", ParagraphStyle('Sub', parent=style_texto, alignment=1)),
-                Spacer(1, 15),
-                
-                Paragraph("1. DIAGNÓSTICO DO IMÓVEL AVALIANDO", style_secao),
-                Paragraph("Variáveis independentes identificadas e quantificadas automaticamente para esta região:", style_texto),
-                Spacer(1, 5),
-                tabela_carac,
-                Spacer(1, 12),
-                
-                Paragraph("2. RESULTADOS DO MODELO MULTIFATORIAL", style_secao),
-                Paragraph(f"<b>Valor de Mercado Estimado:</b> R$ {preco_estimado:,.2f}", style_texto),
-                Paragraph(f"<b>Limite Inferior Admissível (85%):</b> R$ {limite_inferior:,.2f}", style_texto),
-                Paragraph(f"<b>Limite Superior Admissível (115%):</b> R$ {limite_superior:,.2f}", style_texto),
-                Paragraph(f"<b>Grau de Ajuste Estatístico (R²):</b> {r2_score*100:.2f}%", style_texto),
-                Spacer(1, 8),
-                
-                Paragraph("3. EQUAÇÃO MATEMÁTICA DA REGRESSÃO", style_secao),
-                Paragraph(f"{equacao_texto}", style_code),
-                Spacer(1, 12),
-                
-                Paragraph("4. MATRIZ DE DIAGNÓSTICOS GRÁFICOS (ANEXO NBR 14653)", style_secao),
-                Image(img_buf, width=480, height=320),
-                Spacer(1, 10),
-                Paragraph("<font size=7 color='#777777'>Relatório emitido em conformidade normativa.</font>", style_texto)
-            ]
-            
-            doc.build(story)
-            pdf_buf.seek(0)
-
-            st.sidebar.markdown("---")
-            st.sidebar.download_button(label="📥 Baixar Laudo Avançado (PDF)", data=pdf_buf, file_name="Laudo_Tecnico_Avancado.pdf", mime="application/pdf")
-        else:
-            st.warning(f"⚠️ Amostras insuficientes para a quantidade de variáveis encontradas nesta planilha.")
-else:
-    st.info("💡 Escolha uma região salva no menu lateral ou selecione a opção de upload manual para começar.")
+            style_secao = ParagraphStyle('SecaoStyle', parent=styles['Heading2'], fontSize=11, textColor=colors.HexColor('#002d62
