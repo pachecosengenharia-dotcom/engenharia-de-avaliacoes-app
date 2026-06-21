@@ -42,4 +42,4 @@ if regiao:
         # ... (segue o cálculo do modelo, interface e gráficos como antes) ...
         
     except Exception as e:
-        st.error(f"Erro ao processar: {e}")vvvvvvvvvvvvvvvvvvvvvvvvv
+        st.error(f"Erro ao processar: {e}")
