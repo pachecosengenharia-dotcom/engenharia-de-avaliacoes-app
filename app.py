@@ -7,11 +7,11 @@ import io
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
-# --- Configuração da Página ---
+# --- Configuração ---
 st.set_page_config(layout="wide")
 st.title("📊 AVM - Engenharia de Avaliações (NBR 14653)")
 
-# --- Função de Geração de PDF ---
+# --- Função PDF Corrigida ---
 def gerar_laudo_pdf(d, fig, eq_str):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
@@ -22,10 +22,15 @@ def gerar_laudo_pdf(d, fig, eq_str):
     c.drawString(50, 750, f"V.U. Médio: R$ {d['vu']:,.2f} | Total: R$ {d['total']:,.2f}")
     c.drawString(50, 730, f"Limites (95%): R$ {d['min']:,.2f} a R$ {d['max']:,.2f}")
     
+    # Salva o gráfico em um buffer de bytes e usa como imagem
     img_buf = io.BytesIO()
     fig.savefig(img_buf, format='png')
     img_buf.seek(0)
-    c.drawImage(img_buf, 50, 350, width=500, height=300)
+    
+    # O ReportLab precisa que a imagem seja tratada como um arquivo ou via leitor de imagem
+    from reportlab.lib.utils import ImageReader
+    c.drawImage(ImageReader(img_buf), 50, 350, width=500, height=300)
+    
     c.save()
     buffer.seek(0)
     return buffer
@@ -77,8 +82,4 @@ if arquivo:
                 c1, c2, c3 = st.columns(3)
                 c1.metric("V.U. Mínimo", f"R$ {min_v:,.2f}")
                 c2.metric("V.U. Médio", f"R$ {vu:,.2f}")
-                c3.metric("V.U. Máximo", f"R$ {max_v:,.2f}")
-                st.metric("Valor Total Estimado", f"R$ {total:,.2f}")
-                
-                pdf = gerar_laudo_pdf({'vu': vu, 'min': min_v, 'max': max_v, 'total': total}, fig, eq_str)
-                st.download_button("📥 Baixar Laudo PDF Completo", pdf, "laudo_tecnico.pdf")
+                c3.metric
