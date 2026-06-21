@@ -153,6 +153,46 @@ if df is not None:
             X_scaled = scaler.fit_transform(X.values)
             
             modelo = LinearRegression().fit(X_scaled, y.values)
+            y_pred_todo = modelo.predict(X_scaled)
             
-            # Previsões usando dados na escala correta
-            y_pred_todo
+            # Ajuste dinâmico do array de input para o preditor
+            dados_imovel_lista = [caracteristicas_avaliando[var] for var in variaveis_independentes]
+            dados_imovel_array = np.array(dados_imovel_lista).reshape(1, -1)
+            dados_imovel_scaled = scaler.transform(dados_imovel_array)
+            
+            preco_estimado = max(0, modelo.predict(dados_imovel_scaled)[0])
+            r2_score = modelo.score(X_scaled, y.values)
+            
+            limite_inferior, limite_superior = preco_estimado * 0.85, preco_estimado * 1.15
+
+            # Diagnósticos de Cook e Resíduos
+            residuos = y.values - y_pred_todo
+            mse = np.mean(residuos ** 2) if np.mean(residuos ** 2) > 0 else 1.0
+            leverage = np.ones(len(df)) * (len(variaveis_independentes) / len(df))
+            distancia_cook = (residuos ** 2 / (len(variaveis_independentes) * mse)) * (leverage / (1 - leverage) ** 2)
+            corte_cook = 4 / len(df)
+
+            # Apresentação na Tela
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Valor de Mercado Estimado", f"R$ {preco_estimado:,.2f}")
+            c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
+            c3.metric("Precisão do Modelo (R²)", f"{r2_score*100:.2f}%")
+
+            # Reconstrução matemática unificada para escala original
+            coef_originais = modelo.coef_ / scaler.scale_
+            intercept_original = modelo.intercept_ - np.sum(modelo.coef_ * scaler.mean_ / scaler.scale_)
+            
+            equacao_texto = f"Preço = {intercept_original:,.2f}"
+            for var, coef in zip(variaveis_independentes, coef_originais):
+                sinal = "+" if coef >= 0 else "-"
+                equacao_texto += f" {sinal} {abs(coef):,.2f} × {var}"
+            
+            st.info(f"📐 **Equação de Regressão Linear Múltipla:** \n`{equacao_texto}`")
+
+            # --- MATRIZ DE DIAGNÓSTICOS GRÁFICOS ---
+            fig, axs = plt.subplots(2, 2, figsize=(11, 7.5))
+            plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+
+            # 1. Dispersão Real
+            axs[0,0].scatter(df['Area_Construida'].values, df['Preco'].values, color='#002d62', alpha=0.5, label="Amostras")
+            axs[0,0].scatter([caracteristicas_avaliando['Area_Construida']], [preco_estimado], color='#d
