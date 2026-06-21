@@ -37,7 +37,7 @@ if arquivo_upload:
         col_normalizada = col.lower().strip()
         if any(x in col_normalizada for x in ['prec', 'val', 'vlr', 'montante']): 
             mapeamento_colunas[col] = 'Preco'
-        elif any(x in col_normalizada for x in ['área const', 'area const', 'área priv', 'area priv', 'área útil', 'area util']) or col_normalizada == 'area' or col_normalizada == 'área': 
+        elif any(x in col_normalizada for x in ['área const', 'area const', 'área priv', 'area priv', 'área útil', 'area util']) or col_normalizada in ['area', 'área', 'm2', 'm²']: 
             mapeamento_colunas[col] = 'Area_Construida'
         elif any(x in col_normalizada for x in ['terren', 'glen', 'área tot', 'area tot']): 
             mapeamento_colunas[col] = 'Area_Terreno'
@@ -61,29 +61,37 @@ if arquivo_upload:
     df = df.rename(columns=mapeamento_colunas)
     df = df.loc[:, ~df.columns.duplicated()]
 
-    # Obrigatoriedades mínimas estruturais
-    colunas_obrigatorias = ['Preco', 'Area_Construida']
-    
-    if not all(c in df.columns for c in colunas_obrigatorias):
-        st.error(f"Não mapeamos as colunas essenciais (Preço e Área Construída). Colunas na planilha: {list(df.columns)}")
+    # Obrigatoriedades mínimas
+    if 'Preco' not in df.columns or 'Area_Construida' not in df.columns:
+        st.error(f"Não mapeamos as colunas essenciais (Preço e Área Construída). Colunas identificadas na sua planilha: {list(df.columns)}")
     else:
-        # Identificar dinamicamente quais das novas variáveis existem na planilha
-        todas_variaveis = ['Area_Construida', 'Area_Terreno', 'Quartos', 'Suites', 'Vagas', 'Conservacao', 'Padrao_Acabamento', 'Setor_Urbano', 'Data_Evento', 'Evento']
-        variaveis_independentes = [v for v in todas_variaveis if v in df.columns]
+        # Tratamento inteligente de variáveis categóricas/texto (ex: Alto, Médio, Baixo)
+        if 'Padrao_Acabamento' in df.columns:
+            df['Padrao_Acabamento'] = df['Padrao_Acabamento'].astype(str).str.lower()
+            df['Padrao_Acabamento'] = df['Padrao_Acabamento'].map({'alto': 3, 'luxo': 3, 'medio': 2, 'médio': 2, 'normal': 2, 'baixo': 1, 'economico': 1, 'econômico': 1}).fillna(2)
 
         def limpar_numero(valor):
             txt = str(valor).strip().replace('R$', '').replace(' ', '')
             if not txt or txt.lower() in ['nan', 'null', '']: return np.nan
+            # Se for formato de data (ex: 10/2025), pega apenas o ano ou mês numérico
+            if '/' in txt:
+                partes = txt.split('/')
+                try: return float(partes[-1])
+                except: return np.nan
             if ',' in txt and '.' in txt: txt = txt.replace('.', '')
             txt = txt.replace(',', '.')
             txt = re.sub(r'[^\d.]', '', txt)
             try: return float(txt)
             except: return np.nan
 
-        # Limpeza rigorosa dos dados numéricos
-        colunas_para_limpar = ['Preco'] + variaveis_independentes
-        for col in colunas_para_limpar:
-            df[col] = df[col].astype(str).apply(limpar_numero)
+        todas_variaveis = ['Area_Construida', 'Area_Terreno', 'Quartos', 'Suites', 'Vagas', 'Conservacao', 'Padrao_Acabamento', 'Setor_Urbano', 'Data_Evento', 'Evento']
+        variaveis_independentes = [v for v in todas_variaveis if v in df.columns]
+
+        # Limpar os dados numericamente sem descartar linhas de forma agressiva
+        df['Preco'] = df['Preco'].astype(str).apply(limpar_numero)
+        for col in variaveis_independentes:
+            if col != 'Padrao_Acabamento': # Já tratado acima
+                df[col] = df[col].astype(str).apply(limpar_numero)
             df[col] = df[col].fillna(df[col].median() if not df[col].isnull().all() else 1.0)
 
         df = df.dropna(subset=['Preco', 'Area_Construida'])
@@ -92,7 +100,6 @@ if arquivo_upload:
         st.sidebar.header("⚙️ Características do Imóvel")
         caracteristicas_avaliando = {}
         
-        # Gerar inputs apenas para o que de fato existe na planilha do Engenheiro
         if 'Area_Construida' in variaveis_independentes:
             caracteristicas_avaliando['Area_Construida'] = st.sidebar.number_input("Área Construída / Privativa (m²)", value=120.0, step=1.0)
         if 'Area_Terreno' in variaveis_independentes:
@@ -110,12 +117,12 @@ if arquivo_upload:
         if 'Setor_Urbano' in variaveis_independentes:
             caracteristicas_avaliando['Setor_Urbano'] = st.sidebar.number_input("Fator de Bairro / Localização", value=1.0, step=0.1)
         if 'Data_Evento' in variaveis_independentes:
-            caracteristicas_avaliando['Data_Evento'] = st.sidebar.number_input("Data do Evento (Meses ou Fator)", value=1.0, step=1.0)
+            caracteristicas_avaliando['Data_Evento'] = st.sidebar.number_input("Data do Evento (Ano ou Mês numérico)", value=2026.0, step=1.0)
         if 'Evento' in variaveis_independentes:
             caracteristicas_avaliando['Evento'] = st.sidebar.number_input("Fator de Evento (Venda=1.0 / Oferta=0.9)", value=1.0, step=0.05)
 
         if len(df) >= len(variaveis_independentes) + 1:
-            # Processamento da Regressão Linear Múltipla
+            # Processamento da Regressão Linear
             X = df[variaveis_independentes]
             y = df['Preco']
             modelo = LinearRegression().fit(X, y)
@@ -125,7 +132,7 @@ if arquivo_upload:
             r2_score = modelo.score(X, y)
             limite_inferior, limite_superior = preco_estimado * 0.85, preco_estimado * 1.15
 
-            # Exibição dos Resultados Técnicos
+            # Exibição dos Resultados
             c1, c2, c3 = st.columns(3)
             c1.metric("Valor de Mercado Estimado", f"R$ {preco_estimado:,.2f}")
             c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
@@ -133,7 +140,7 @@ if arquivo_upload:
 
             st.info(f"📐 **Variáveis processadas no cálculo multifatorial:** {', '.join(variaveis_independentes)}")
 
-            # Gráfico de Tendência (Área Construída x Preço)
+            # Gráfico
             fig, ax = plt.subplots(figsize=(8, 3.5))
             sns.scatterplot(data=df, x='Area_Construida', y='Preco', color='#002d62', alpha=0.6, ax=ax, label="Amostras de Mercado")
             ax.scatter([caracteristicas_avaliando['Area_Construida']], [preco_estimado], color='#d9534f', s=150, marker='*', label="Imóvel Avaliando")
@@ -141,7 +148,7 @@ if arquivo_upload:
             ax.grid(True, alpha=0.3)
             st.pyplot(fig)
 
-            # Geração do Relatório PDF
+            # Relatório PDF
             img_buf = io.BytesIO()
             fig.savefig(img_buf, format='png', dpi=200)
             img_buf.seek(0)
@@ -154,4 +161,18 @@ if arquivo_upload:
             story = [
                 Paragraph("LAUDO DE AVALIAÇÃO TÉCNICA MERCADOLÓGICA", ParagraphStyle('T', fontSize=18, textColor=colors.HexColor('#002d62'), alignment=1)),
                 Spacer(1, 15),
-                Paragraph
+                Paragraph(detalhes_texto, styles['Normal']),
+                Spacer(1, 5),
+                Paragraph(f"<b>Valor de Mercado Inferido: R$ {preco_estimado:,.2f}</b>", styles['Normal']),
+                Spacer(1, 15),
+                Image(img_buf, width=400, height=180)
+            ]
+            doc.build(story)
+            pdf_buf.seek(0)
+
+            st.sidebar.markdown("---")
+            st.sidebar.download_button(label="📥 Baixar Laudo Oficial (PDF)", data=pdf_buf, file_name="Laudo_Tecnico_Profissional.pdf", mime="application/pdf")
+        else:
+            st.warning(f"Amostras insuficientes após tratamento de dados. Linhas válidas na planilha: {len(df)}. Variáveis ativas: {len(variaveis_independentes)}.")
+else:
+    st.info("💡 Por favor, faça o upload de uma planilha .csv na barra lateral para iniciar.")
