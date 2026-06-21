@@ -18,7 +18,7 @@ if arquivo_csv is not None:
     cols_numericas = [
         'Área Privativa', 'Área do Terreno', 'Quartos', 'Evento', 
         'Padrão de Acabamento', 'Suite', 'Estado de Conservação', 
-        'Idade Aparente', 'Setor urbano', 'Data do Evento', 'Valor Total', 'Valor Unitário'
+        'Idade Aparente', 'Setor urbano', 'Data do Evento', 'Valor Total'
     ]
     
     # 3. Limpeza rigorosa: converte tudo para float, tratando vírgula decimal
