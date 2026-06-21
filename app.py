@@ -74,13 +74,22 @@ if arquivo:
                 vu = modelo.predict(np.array([list(inputs.values())]))[0]
                 std = np.std(df_c[target] - preds)
                 min_v, max_v = vu - (1.96 * std), vu + (1.96 * std)
-                total = vu * (inputs.get('Área Privativa', 1))
+                
+                # Seleção automática da área para o cálculo do total
+                # Se houver uma coluna com "Área" no nome, usa ela, senão pede ao usuário
+                col_area = next((c for c in features if 'área' in c.lower() or 'area' in c.lower()), None)
+                
+                if col_area:
+                    total = vu * inputs[col_area]
+                    st.metric("Valor Total Estimado", f"R$ {total:,.2f}")
+                else:
+                    st.warning("Coluna de área não identificada para o cálculo do total.")
+                    total = vu # Fallback
                 
                 c1, c2, c3 = st.columns(3)
                 c1.metric("V.U. Mínimo", f"R$ {min_v:,.2f}")
                 c2.metric("V.U. Médio", f"R$ {vu:,.2f}")
                 c3.metric("V.U. Máximo", f"R$ {max_v:,.2f}")
-                st.metric("Valor Total Estimado", f"R$ {total:,.2f}")
                 
                 pdf = gerar_laudo_pdf({'vu': vu, 'min': min_v, 'max': max_v, 'total': total}, fig, eq_str, inputs)
                 st.download_button("📥 Baixar Laudo PDF", pdf, "laudo_tecnico.pdf")
