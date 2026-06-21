@@ -22,32 +22,24 @@ def gerar_pdf(regiao, pred_unit, pred_total, minimo, maximo, eq_str, features, n
     c.setFont("Helvetica", 12)
     c.drawString(50, 770, f"Região: {regiao} | Amostras: {n_amostras}")
     c.drawString(50, 740, f"Equação: {eq_str}")
-    c.drawString(50, 700, f"V.U. Médio: R$ {pred_unit:,.2f} | Valor Total: R$ {pred_total:,.2f}")
+    c.drawString(50, 700, f"V.U. Médio: R$ {pred_unit:,.2f} | Total: R$ {pred_total:,.2f}")
+    c.drawString(50, 670, f"Amplitude (95%): R$ {minimo:,.2f} a R$ {maximo:,.2f}")
+    c.drawString(50, 640, "Variáveis: " + ", ".join(features))
     c.save()
     buffer.seek(0)
     return buffer
 
 if regiao:
     try:
-        # Leitura com verificação
         df = pd.read_csv(regiao, sep=";", encoding='latin-1')
         df.columns = [c.strip() for c in df.columns]
-        
-        # DEBUG: Mostra colunas encontradas para você conferir
-        st.write("Colunas encontradas no arquivo:", df.columns.tolist())
-        
-        col_alvo = 'Valor Unitário'
-        if col_alvo not in df.columns:
-            st.error(f"Coluna alvo '{col_alvo}' não encontrada. Verifique se o nome no CSV está idêntico.")
-            st.stop()
 
-        # Limpeza e seleção
+        col_alvo = 'Valor Unitário'
+        # Seleção dinâmica filtrando apenas colunas relevantes
         features = [c for c in df.columns if c != col_alvo and c.lower() != 'idade aparente']
-        if 'Setor Urbano' not in features:
-            features.append('Setor Urbano')
-            
-        # Filtra apenas o que é numérico
-        df_modelo = df[features + [col_alvo]].apply(lambda x: pd.to_numeric(x.astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce'))
+        
+        # Converte tudo para numérico
+        df_modelo = df[features + [col_alvo]].apply(pd.to_numeric, errors='coerce')
         df_modelo = df_modelo.dropna()
 
         if not df_modelo.empty:
@@ -56,25 +48,31 @@ if regiao:
             modelo = LinearRegression().fit(X, y)
             
             # Equação
-            eq_str = f"VU = {modelo.intercept_:.2f} " + " ".join([f"+ ({c:.2f}*{n})" for n, c in zip(features, modelo.coef_)])
+            eq_str = f"VU = {modelo.intercept_:.2f}"
+            st.subheader("Equação do Modelo")
             st.latex(eq_str)
 
             # Inputs
             st.sidebar.header("⚙️ Parâmetros")
             inputs = [st.sidebar.number_input(f"{n}", value=float(df_modelo[n].median())) for n in features]
-            
-            # Resultados
             pred_unit = modelo.predict([inputs])[0]
+            
+            # Cálculos estatísticos
+            residuos = y - modelo.predict(X)
+            erro_padrao = np.std(residuos)
+            minimo, maximo = pred_unit - (1.96 * erro_padrao), pred_unit + (1.96 * erro_padrao)
             area = inputs[features.index('Área Construída')] if 'Área Construída' in features else 1
-            minimo, maximo = pred_unit * 0.9, pred_unit * 1.1 # Aproximação estatística
             
-            st.metric("V.U. Médio", f"R$ {pred_unit:,.2f}")
-            
-            # Gráficos
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-            ax1.scatter(y, modelo.predict(X), alpha=0.5); ax1.set_title("Aderência")
-            ax2.scatter(modelo.predict(X), y - modelo.predict(X), alpha=0.5); ax2.set_title("Resíduos")
-            st.pyplot(fig)
-            
-            # PDF
+            # Métricas
+            col1, col2, col3 = st.columns(3)
+            col1.metric("V.U. Mínimo", f"R$ {minimo:,.2f}")
+            col2.metric("V.U. Médio", f"R$ {pred_unit:,.2f}")
+            col3.metric("V.U. Máximo", f"R$ {maximo:,.2f}")
+
+            # Botão de Download do Laudo
             pdf_data = gerar_pdf(regiao, pred_unit, pred_unit*area, minimo, maximo, eq_str, features, len(df_modelo))
+            st.download_button("📥 Baixar Laudo Completo", data=pdf_data, file_name="laudo.pdf", mime="application/pdf")
+        else:
+            st.error("Dados insuficientes.")
+    except Exception as e:
+        st.error(f"Erro técnico: {e}")
