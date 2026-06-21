@@ -17,7 +17,7 @@ import unicodedata
 st.set_page_config(page_title="Engenharia de Avaliações", layout="wide")
 
 st.title("📊 Sistema Profissional de Engenharia de Avaliações")
-st.markdown("Modelagem estatística adaptativa e laudos técnicos em conformidade com las diretrizes normativas.")
+st.markdown("Modelagem estatística adaptativa e laudos técnicos em conformidade com as diretrizes normativas.")
 
 # --- GERENCIAMENTO DE BANCO DE DADOS ---
 st.sidebar.header("📁 Base de Dados")
@@ -103,90 +103,4 @@ if df is not None:
             txt = str(valor).strip().replace('R$', '').replace(' ', '')
             if not txt or txt.lower() in ['nan', 'null', '']: return np.nan
             if ',' in txt and '.' in txt:
-                if txt.find('.') < txt.find(','): txt = txt.replace('.', '')
-                else: txt = txt.replace(',', '')
-            if ',' in txt and '.' not in txt:
-                txt = txt.replace(',', '.')
-            txt = re.sub(r'[^\d.]', '', txt)
-            try: return float(txt)
-            except: return np.nan
-
-        df['Preco'] = df['Preco'].apply(limpar_para_numero_puro)
-        for col in variaveis_independentes:
-            df[col] = df[col].apply(limpar_para_numero_puro)
-            df[col] = df[col].fillna(df[col].median() if not df[col].isnull().all() else 1.0)
-
-        df = df.dropna(subset=['Preco', 'Area_Construida'])
-
-        # Painel Lateral
-        st.sidebar.header("⚙️ Characteristics do Imóvel")
-        caracteristicas_avaliando = {}
-        
-        for var in variaveis_independentes:
-            if var == 'Area_Construida':
-                caracteristicas_avaliando[var] = st.sidebar.number_input("Área Construída (m²)", value=120.0, step=1.0)
-            elif var == 'Area_Terreno':
-                caracteristicas_avaliando[var] = st.sidebar.number_input("Área do Terreno (m²)", value=360.0, step=1.0)
-            elif var in ['Quartos', 'Suites', 'Vagas']:
-                label_nome = "Quartos" if var == 'Quartos' else ("Suítes" if var == 'Suites' else "Vagas de Garagem")
-                caracteristicas_avaliando[var] = st.sidebar.slider(f"Quantidade de {label_nome}", 0, 5, 1 if var != 'Quartos' else 3)
-            elif var in ['Conservacao', 'Padrao_Acabamento']:
-                label = "Estado de Conservação" if var == 'Conservacao' else "Padrão de Acabamento"
-                caracteristicas_avaliando[var] = st.sidebar.selectbox(label, [1, 2, 3], index=1, format_func=lambda x: {1:"Baixo/Regular", 2:"Médio/Bom", 3:"Alto/Excelente"}[x])
-            elif var == 'Setor_Urbano':
-                valor_inicial = float(df['Setor_Urbano'].median()) if len(df) > 0 else 500.0
-                caracteristicas_avaliando[var] = st.sidebar.number_input("Setor Urbano (Fator)", min_value=0.0, max_value=5000.0, value=valor_inicial, step=10.0)
-            elif var == 'Data_Evento':
-                valor_data = float(df['Data_Evento'].median()) if len(df) > 0 else 1.0
-                caracteristicas_avaliando[var] = st.sidebar.number_input("Data do Evento (Mês/Fator)", value=valor_data, step=1.0)
-            elif var == 'Evento':
-                caracteristicas_avaliando[var] = st.sidebar.number_input("Fator de Evento", value=1.0, step=0.05)
-            elif var == 'Idade_Aparent':
-                caracteristicas_avaliando[var] = st.sidebar.number_input("Idade Aparente (Anos)", value=10.0, step=1.0)
-
-        if len(df) >= len(variaveis_independentes) + 2:
-            X = df[variaveis_independentes]
-            y = df['Preco']
-            
-            # Escalonamento estatístico estável
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X.values)
-            
-            # --- PROTEÇÃO INDEPENDENTE DE OBJETO DE MODELO ---
-            modelo_regressao_NBR = LinearRegression().fit(X_scaled, y.values)
-            y_pred_todo = modelo_regressao_NBR.predict(X_scaled)
-            
-            dados_imovel_lista = [caracteristicas_avaliando[var] for var in variaveis_independentes]
-            dados_imovel_array = np.array(dados_imovel_lista).reshape(1, -1)
-            dados_imovel_scaled = scaler.transform(dados_imovel_array)
-            
-            preco_estimado = max(0, modelo_regressao_NBR.predict(dados_imovel_scaled)[0])
-            r2_score = modelo_regressao_NBR.score(X_scaled, y.values)
-            
-            limite_inferior, limite_superior = preco_estimado * 0.85, preco_estimado * 1.15
-
-            # Diagnósticos de Cook e Resíduos
-            residuos = y.values - y_pred_todo
-            mse = np.mean(residuos ** 2) if np.mean(residuos ** 2) > 0 else 1.0
-            leverage = np.ones(len(df)) * (len(variaveis_independentes) / len(df))
-            distancia_cook = (residuos ** 2 / (len(variaveis_independentes) * mse)) * (leverage / (1 - leverage) ** 2)
-            corte_cook = 4 / len(df)
-
-            # Apresentação na Tela
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Valor de Mercado Estimado", f"R$ {preco_estimado:,.2f}")
-            c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
-            c3.metric("Precisão do Modelo (R²)", f"{r2_score*100:.2f}%")
-
-            # Reconstrução matemática isolada da equação
-            coef_originais = modelo_regressao_NBR.coef_ / scaler.scale_
-            intercept_original = modelo_regressao_NBR.intercept_ - np.sum(modelo_regressao_NBR.coef_ * scaler.mean_ / scaler.scale_)
-            
-            equacao_texto = f"Preço = {intercept_original:,.2f}"
-            for var, coef in zip(variaveis_independentes, coef_originais):
-                sinal = "+" if coef >= 0 else "-"
-                equacao_texto += f" {sinal} {abs(coef):,.2f} × {var}"
-            
-            st.info(f"📐 **Equação de Regressão Linear Múltipla:** \n`{equacao_texto}`")
-
-            # --- MATRIZ DE DIAGNÓSTICOS GRÁFICOS ---
+                if txt.find
