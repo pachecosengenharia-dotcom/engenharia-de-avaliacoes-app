@@ -2,66 +2,44 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
-import matplotlib.pyplot as plt
-import seaborn as sns
 
-st.set_page_config(layout="wide")
-st.title("📊 Engenharia de Avaliações - Goiânia")
+st.title("📊 Engenharia de Avaliações - Debug Final")
 
 try:
-    # 1. Leitura do ficheiro com tratamento de codificação
+    # 1. Leitura com tratamento de separador
     df = pd.read_csv("Goiânia - GO.csv", sep=";", encoding='latin-1')
     df.columns = [c.strip() for c in df.columns]
-
-    # 2. Função "Blindada" para limpar os dados
-    def tratar_coluna(col):
-        # Transforma tudo em string, tira pontos de milhar, troca vírgula por ponto
-        return pd.to_numeric(col.astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce')
-
-    # Aplicar a limpeza em todas as colunas
+    
+    st.write("Total de linhas originais:", len(df))
+    
+    # 2. Limpeza Manual dos dados (substituir vírgula por ponto e remover caracteres)
+    # Selecionamos todas as colunas que não são texto puro
     for col in df.columns:
-        if col != 'Valor Total': # Mantemos o alvo como referência
-             df[col] = tratar_coluna(df[col])
+        if df[col].dtype == 'object':
+            # Removemos R$, espaços, e tratamos pontos/vírgulas
+            df[col] = df[col].astype(str).str.replace('R$', '', regex=False)
+            df[col] = df[col].astype(str).str.replace('.', '', regex=False)
+            df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
+            df[col] = pd.to_numeric(df[col], errors='coerce')
     
-    df['Valor Total'] = tratar_coluna(df['Valor Total'])
+    # 3. Diagnóstico crucial: quantas linhas sobram após a limpeza?
+    df_limpo = df.dropna()
+    st.write("Linhas após limpeza (dropna):", len(df_limpo))
     
-    # Removemos linhas que ficaram vazias após a limpeza
-    df = df.dropna()
-
-    # 3. Definição das variáveis automaticamente
-    target = 'Valor Total'
-    features = [c for c in df.columns if c != target]
-    
-    st.write("Variáveis detectadas:", features)
-
-    # 4. Regressão
-    X = df[features]
-    y = df[target]
-    modelo = LinearRegression().fit(X, y)
-
-    # 5. Interface
-    st.sidebar.header("⚙️ Parâmetros do Imóvel")
-    inputs = {}
-    for col in features:
-        inputs[col] = st.sidebar.number_input(f"{col}", value=float(df[col].median()))
-
-    # 6. Cálculo
-    pred = modelo.predict([list(inputs.values())])
-    st.metric("Valor Estimado", f"R$ {pred[0]:,.2f}")
-
-    # 7. Diagnóstico Gráfico (NBR 14653)
-    st.subheader("📈 Diagnóstico do Modelo")
-    y_pred = modelo.predict(X)
-    
-    fig, ax = plt.subplots(1, 2, figsize=(12, 5))
-    ax[0].scatter(y, y_pred, color='blue', alpha=0.5)
-    ax[0].plot([y.min(), y.max()], [y.min(), y.max()], 'r--')
-    ax[0].set_title("Aderência (Real vs Estimado)")
-    
-    sns.histplot(y - y_pred, kde=True, ax=ax[1], color='purple')
-    ax[1].set_title("Distribuição dos Resíduos")
-    
-    st.pyplot(fig)
+    if len(df_limpo) == 0:
+        st.error("O modelo não encontrou dados válidos. Provavelmente os números no seu CSV não estão a ser convertidos.")
+        st.write("Amostra do que sobrou antes do dropna:", df.head())
+    else:
+        # 4. Regressão (apenas se houver dados)
+        target = 'Valor Total'
+        features = [c for c in df_limpo.columns if c != target and c != 'Index'] # Ajuste o nome da coluna alvo se necessário
+        
+        X = df_limpo[features]
+        y = df_limpo[target]
+        modelo = LinearRegression().fit(X, y)
+        
+        st.success("Modelo treinado com sucesso!")
+        st.write("Variáveis usadas:", features)
 
 except Exception as e:
-    st.error(f"Erro na limpeza dos dados: {e}")
+    st.error(f"Erro: {e}")
