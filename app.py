@@ -30,26 +30,25 @@ if arquivo_upload:
         
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
 
-    # Removidos mapeamentos confusos. O sistema agora lê exatamente as colunas reais da planilha.
-    # Garante apenas a limpeza de espaços nos nomes das colunas
+    # Ajuste de nomes de colunas sem espaços nas pontas
     df.columns = df.columns.str.strip()
 
-    # Identificar quais colunas solicitadas de fato existem na planilha (nomes exatos)
+    # Dicionário de padronização estrita de colunas
     colunas_possiveis = {
-        'Preco': ['Preco', 'Preço', 'Valor', 'Vlr'],
-        'Area_Construida': ['Area_Construida', 'Área_Construída', 'Area Construada', 'Area Const', 'Área Const'],
-        'Area_Terreno': ['Area_Terreno', 'Área_Terreno', 'Area Terreno', 'Terreno'],
-        'Quartos': ['Quartos', 'Dormitorios', 'Dormitórios'],
-        'Suites': ['Suites', 'Suítes'],
-        'Vagas': ['Vagas', 'Garagem'],
-        'Conservacao': ['Conservacao', 'Conservação'],
-        'Padrao_Acabamento': ['Padrao_Acabamento', 'Padrão_Acabamento', 'Padrao', 'Padrão', 'Acabamento'],
-        'Setor_Urbano': ['Setor_Urbano', 'Setor Urbano', 'Setor'],
-        'Data_Evento': ['Data_Evento', 'Data Evento', 'Data'],
-        'Evento': ['Evento']
+        'Preco': ['Preco', 'Preço', 'Valor', 'Vlr', 'PRECO', 'PREÇO'],
+        'Area_Construida': ['Area_Construida', 'Área_Construída', 'Area Construida', 'Área Construída', 'Area Const', 'Área Const', 'AREA_CONSTRUIDA'],
+        'Area_Terreno': ['Area_Terreno', 'Área_Terreno', 'Area Terreno', 'Terreno', 'AREA_TERRENO'],
+        'Quartos': ['Quartos', 'Dormitorios', 'Dormitórios', 'QUARTOS'],
+        'Suites': ['Suites', 'Suítes', 'SUITES'],
+        'Vagas': ['Vagas', 'Garagem', 'VAGAS'],
+        'Conservacao': ['Conservacao', 'Conservação', 'CONSERVACAO'],
+        'Padrao_Acabamento': ['Padrao_Acabamento', 'Padrão_Acabamento', 'Padrao', 'Padrão', 'Acabamento', 'PADRAO'],
+        'Setor_Urbano': ['Setor_Urbano', 'Setor Urbano', 'Setor', 'SETOR', 'SETOR_URBANO'],
+        'Data_Evento': ['Data_Evento', 'Data Evento', 'Data', 'DATA'],
+        'Evento': ['Evento', 'EVENTO']
     }
 
-    # Renomeação exata baseada na lista acima para evitar conflitos de índices
+    # Renomeação das colunas identificadas
     for padrao, sinonimos in colunas_possiveis.items():
         for col in df.columns:
             if col in sinonimos:
@@ -57,9 +56,8 @@ if arquivo_upload:
 
     # Obrigatoriedades mínimas
     if 'Preco' not in df.columns or 'Area_Construida' not in df.columns:
-        st.error(f"Não mapeamos as colunas essenciais (Preco e Area_Construida). Certifique-se de que os nomes estão idênticos na planilha. Colunas atuais: {list(df.columns)}")
+        st.error(f"Não mapeamos as colunas essenciais (Preco e Area_Construida). Verifique se os nomes das colunas na sua planilha batem com as esperadas. Colunas atuais: {list(df.columns)}")
     else:
-        # Lista de variáveis independentes reais presentes
         todas_vars = ['Area_Construida', 'Area_Terreno', 'Quartos', 'Suites', 'Vagas', 'Conservacao', 'Padrao_Acabamento', 'Setor_Urbano', 'Data_Evento', 'Evento']
         variaveis_independentes = [v for v in todas_vars if v in df.columns]
 
@@ -72,7 +70,7 @@ if arquivo_upload:
             try: return float(txt)
             except: return np.nan
 
-        # Limpar os dados numericamente
+        # Limpeza numérica estrita de todas as colunas
         df['Preco'] = df['Preco'].astype(str).apply(limpar_numero)
         for col in variaveis_independentes:
             df[col] = df[col].astype(str).apply(limpar_numero)
@@ -102,14 +100,19 @@ if arquivo_upload:
         if 'Padrao_Acabamento' in variaveis_independentes:
             caracteristicas_avaliando['Padrao_Acabamento'] = st.sidebar.selectbox("Padrão de Acabamento", [1, 2, 3], index=1, format_func=lambda x: {1:"Baixo", 2:"Médio", 3:"Alto"}[x])
         
-        # Campo numérico totalmente liberado para a escala real da sua planilha (50 a 1500)
+        # Campo numérico totalmente blindado e fixado contra erros de limites (0 a 5000)
         if 'Setor_Urbano' in variaveis_independentes:
-            valor_padrao = float(df['Setor_Urbano'].median()) if len(df) > 0 else 500.0
+            try:
+                valor_inicial = float(df['Setor_Urbano'].median())
+                if np.isnan(valor_inicial): valor_inicial = 500.0
+            except:
+                valor_inicial = 500.0
+                
             caracteristicas_avaliando['Setor_Urbano'] = st.sidebar.number_input(
                 "Setor_Urbano", 
                 min_value=0.0,
                 max_value=5000.0,
-                value=valor_padrao, 
+                value=valor_inicial, 
                 step=10.0
             )
 
@@ -119,7 +122,7 @@ if arquivo_upload:
             caracteristicas_avaliando['Evento'] = st.sidebar.number_input("Fator de Evento", value=1.0, step=0.05)
 
         if len(df) >= 2:
-            # Regressão Ridge para estabilização multifatorial
+            # Regressão Ridge para estabilização estatística de múltiplas escalas
             X = df[variaveis_independentes]
             y = df['Preco']
             modelo = Ridge(alpha=1.0).fit(X, y)
@@ -141,4 +144,28 @@ if arquivo_upload:
             fig, ax = plt.subplots(figsize=(8, 3.5))
             sns.scatterplot(data=df, x='Area_Construida', y='Preco', color='#002d62', alpha=0.6, ax=ax, label="Amostras de Mercado")
             ax.scatter([caracteristicas_avaliando['Area_Construida']], [preco_estimado], color='#d9534f', s=150, marker='*', label="Imóvel Avaliando")
-            ax.set_title("Gráfico de Dispersão - Engenharia de Avalia
+            ax.set_title("Gráfico de Dispersão - Engenharia de Avaliações")
+            ax.grid(True, alpha=0.3)
+            st.pyplot(fig)
+
+            # Relatório PDF
+            img_buf = io.BytesIO()
+            fig.savefig(img_buf, format='png', dpi=200)
+            img_buf.seek(0)
+            
+            pdf_buf = io.BytesIO()
+            doc = SimpleDocTemplate(pdf_buf, pagesize=letter)
+            styles = getSampleStyleSheet()
+            
+            detalhes_texto = " | ".join([f"<b>{k}:</b> {v}" for k, v in caracteristicas_avaliando.items()])
+            story = [
+                Paragraph("LAUDO DE AVALIAÇÃO TÉCNICA MERCADOLÓGICA", ParagraphStyle('T', fontSize=18, textColor=colors.HexColor('#002d62'), alignment=1)),
+                Spacer(1, 15),
+                Paragraph(detalhes_texto, styles['Normal']),
+                Spacer(1, 5),
+                Paragraph(f"<b>Valor de Mercado Inferido: R$ {preco_estimado:,.2f}</b>", styles['Normal']),
+                Spacer(1, 15),
+                Image(img_buf, width=400, height=180)
+            ]
+            doc.build(story)
+            pdf_buf.
