@@ -41,33 +41,50 @@ def gerar_laudo_pdf(endereco, valor_medio, eq_str):
 # --- Lógica Principal ---
 arquivo_csv = st.sidebar.file_uploader("Carregar Base de Dados (CSV)", type="csv")
 
+# --- Lógica de Modelagem Corrigida ---
 if arquivo_csv is not None:
-    # Leitura e Tratamento
+    # 1. Leitura
     df = pd.read_csv(arquivo_csv, sep=";", encoding='latin-1')
-    df.columns = [c.strip() for c in df.columns]
     
+    # 2. Definição do alvo e limpeza
+    # O CSV está usando vírgula como decimal. Precisamos converter para ponto.
     col_alvo = 'Valor Unitário'
-    features = [c for c in df.columns if c != col_alvo]
     
+    # Selecionamos apenas as colunas que são numéricas para o modelo
+    # Removemos colunas de texto (Endereço, Bairro, etc)
     df_clean = df.copy()
-    for col in features:
-        df_clean[col] = pd.to_numeric(df_clean[col].astype(str).str.replace(',', '.'), errors='coerce')
     
-    df_clean = df_clean.dropna(subset=features + [col_alvo])
+    # Função para limpar colunas numéricas que estão como texto (troca vírgula por ponto)
+    def limpar_coluna(col):
+        if col.dtype == 'object':
+            return pd.to_numeric(col.astype(str).str.replace(',', '.'), errors='coerce')
+        return col
+
+    # Aplica a limpeza em todas as colunas
+    for col in df_clean.columns:
+        df_clean[col] = limpar_coluna(df_clean[col])
+        
+    # Remove colunas que não são úteis para o modelo (texto puro)
+    # Lista de colunas que devem ser removidas do treinamento
+    cols_drop = ['Endereço', 'Complemento', 'Bairro', 'Informante', 'Telefone', 'Evento']
+    # Ajuste o nome das colunas conforme necessário (considerando o encoding)
+    df_clean = df_clean.drop(columns=[c for c in cols_drop if c in df_clean.columns], errors='ignore')
     
-    # Modelagem
+    # Remove linhas com valores vazios (NaN)
+    df_clean = df_clean.dropna()
+    
+    # 3. Modelagem
+    features = [c for c in df_clean.columns if c != col_alvo]
     X = df_clean[features]
     y = df_clean[col_alvo]
-    modelo = LinearRegression().fit(X, y)
     
-    eq_str = " + ".join([f"{c:.2f}*{n}" for n, c in zip(features, modelo.coef_)])
-    
-    # Interface de Entrada
-    st.sidebar.subheader("📍 Dados do Imóvel")
-    tipo_input = st.sidebar.radio("Fonte de Dados:", ["Manual", "Via PDF"])
-    
-    dados_imovel = {n: 0.0 for n in features}
-    endereco = st.sidebar.text_input("Endereço do Imóvel:")
+    if X.empty or y.empty:
+        st.error("Erro: Dados insuficientes ou inválidos após a limpeza.")
+    else:
+        modelo = LinearRegression().fit(X, y)
+        st.success("Modelo treinado com sucesso!")
+        
+        # ... resto do seu código (inputs, cálculo, download) ...
     
     if tipo_input == "Via PDF":
         doc = st.sidebar.file_uploader("Subir Laudo", type="pdf")
