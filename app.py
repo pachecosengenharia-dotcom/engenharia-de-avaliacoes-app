@@ -42,64 +42,47 @@ def gerar_laudo_pdf(endereco, valor_medio, eq_str):
 arquivo_csv = st.sidebar.file_uploader("Carregar Base de Dados (CSV)", type="csv")
 
 # --- Lógica de Modelagem Corrigida ---
-# --- Carregamento e Limpeza Robusta ---
+# --- MODELAGEM ROBUSTA (SUBSTITUA TODO O BLOCO NO SEU APP) ---
 if arquivo_csv is not None:
-    # 1. Leitura forçada
+    # 1. Leitura inicial
     df = pd.read_csv(arquivo_csv, sep=";", encoding='latin-1')
-    
-    # 2. Identificação dinâmica do alvo (buscando pelo que termina com 'Unitário')
-    col_alvo = [c for c in df.columns if 'Unit' in c][0]
-    
-    # 3. Limpeza rigorosa
-    df_clean = df.copy()
-    
-    # Converte tudo para numérico, tratando a vírgula como ponto
-    for col in df_clean.columns:
-        if df_clean[col].dtype == 'object':
-            # Remove pontos de milhar, troca vírgula por ponto
-            df_clean[col] = df_clean[col].astype(str).str.replace('.', '').str.replace(',', '.')
-            df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
-    
-    # Remove colunas que ficaram com tudo NaN (como texto puro que não virou número)
-    df_clean = df_clean.dropna(axis=1, how='all')
-    
-    # Remove linhas com valores vazios na coluna alvo
-    df_clean = df_clean.dropna(subset=[col_alvo])
-    
-  # 3. Modelagem Robusta (Versão Final para o seu CSV)
-    # Lista das colunas que SÃO NÚMEROS e devem entrar no modelo:
-    cols_numericas = [
+
+    # 2. SELEÇÃO EXPLÍCITA DAS COLUNAS NUMÉRICAS
+    # Identificamos os nomes das colunas conforme o seu CSV
+    cols_para_treino = [
         'Área Privativa', 'Área do Terreno', 'Quartos', 'Evento', 
         'Padrão de Acabamento', 'Suite', 'Estado de Conservação', 
         'Idade Aparente', 'Setor urbano', 'Data do Evento', 'Valor Total'
     ]
     col_alvo = 'Valor Unitário'
-    
-    df_clean = df.copy()
-    
-    # Função para limpar e converter números (trata a vírgula do seu CSV)
-    def converter_num(valor):
-        valor_str = str(valor).replace('.', '').replace(',', '.')
-        try:
-            return float(valor_str)
-        except:
-            return np.nan
 
-    # Aplica conversão apenas nas colunas necessárias
-    for col in cols_numericas + [col_alvo]:
-        if col in df_clean.columns:
-            df_clean[col] = df_clean[col].apply(converter_num)
+    # Criamos um novo DataFrame apenas com o que é número
+    df_clean = pd.DataFrame()
+
+    # Função para limpar vírgulas e converter para float
+    def converter_limpo(coluna):
+        return pd.to_numeric(coluna.astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
+
+    # Processamos cada coluna necessária
+    for col in cols_para_treino + [col_alvo]:
+        if col in df.columns:
+            df_clean[col] = converter_limpo(df[col])
     
-    # Remove qualquer linha que tenha ficado vazia (NaN)
-    df_clean = df_clean.dropna(subset=cols_numericas + [col_alvo])
-    
-    # Define X (variáveis) e y (alvo)
-    X = df_clean[cols_numericas]
-    y = df_clean[col_alvo]
-    
-    # Ajuste do Modelo
-    modelo = LinearRegression().fit(X, y)
-    st.success("Modelo treinado com sucesso!")
+    # 3. Limpeza final: remover linhas com dados faltantes (NaN)
+    df_clean = df_clean.dropna()
+
+    # 4. Ajuste do modelo
+    if not df_clean.empty:
+        X = df_clean[cols_para_treino]
+        y = df_clean[col_alvo]
+        modelo = LinearRegression().fit(X, y)
+        st.success("Modelo treinado com sucesso!")
+        
+        # Opcional: mostrar coeficientes para análise técnica
+        st.write("Coeficientes do Modelo (Impacto nas variáveis):")
+        st.write(pd.Series(modelo.coef_, index=cols_para_treino))
+    else:
+        st.error("Erro: O conjunto de dados resultou vazio. Verifique se as colunas estão preenchidas.")
     
     if X.empty or y.empty:
         st.error("Erro: Dados insuficientes ou inválidos após a limpeza.")
