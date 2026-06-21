@@ -42,6 +42,10 @@ if arquivo_upload:
         elif any(x in col_normalizada for x in ['setor', 'bairro', 'local', 'fator']): mapeamento_colunas[col] = 'Setor_Urbano'
 
     df = df.rename(columns=mapeamento_colunas)
+    
+    # Tratamento para evitar colunas duplicadas geradas pelo mapeamento
+    df = df.loc[:, ~df.columns.duplicated()]
+
     colunas_obrigatorias = ['Preco', 'Area', 'Setor_Urbano']
     
     if not all(c in df.columns for c in colunas_obrigatorias):
@@ -60,8 +64,10 @@ if arquivo_upload:
             try: return float(txt)
             except: return np.nan
 
+        # Correção segura contra KeyError
         for col in ['Preco', 'Area', 'Quartos', 'Vagas', 'Conservacao', 'Setor_Urbano']:
-            df[col] = df[col].apply(limpar_numero)
+            if col in df.columns:
+                df[col] = df[col].astype(str).apply(limpar_numero)
 
         df['Quartos'] = df['Quartos'].fillna(2)
         df['Vagas'] = df['Vagas'].fillna(1)
@@ -78,23 +84,20 @@ if arquivo_upload:
         setor_urbano_avaliando = st.sidebar.number_input("Fator de Bairro / Setor Urbano", value=1.0, step=0.1)
 
         if len(df) >= 3:
-            # Modelo Regressivo Multifatorial
             X = df[['Area', 'Quartos', 'Vagas', 'Conservacao', 'Setor_Urbano']]
             y = df['Preco']
             modelo = LinearRegression().fit(X, y)
             
-            dados_imovel = np.array([[area_avaliando, quartos_avaliando, vagas_avaliando, conservacao_avaliando, setor_urbano_avaliando]])
+            dados_imovel = np.array([[area_avaliando, quartos_avaliando, vagas_avaliando, conservacao_avaliando, sector_urbano_avaliando if 'sector_urbano_avaliando' in locals() else setor_urbano_avaliando]])
             preco_estimado = max(0, modelo.predict(dados_imovel)[0])
             r2_score = modelo.score(X, y)
             limite_inferior, limite_superior = preco_estimado * 0.85, preco_estimado * 1.15
 
-            # Exibição dos Resultados (Métricas)
             c1, c2, c3 = st.columns(3)
             c1.metric("Valor de Mercado Estimado", f"R$ {preco_estimado:,.2f}")
             c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
             c3.metric("Precisão do Modelo (R²)", f"{f'{r2_score*100:.2f}%' if r2_score > 0 else 'N/A'}")
 
-            # Gráfico Interativo
             fig, ax = plt.subplots(figsize=(8, 3.5))
             sns.scatterplot(data=df, x='Area', y='Preco', color='#002d62', alpha=0.6, ax=ax, label="Amostras")
             ax.scatter([area_avaliando], [preco_estimado], color='#d9534f', s=150, marker='*', label="Avaliando")
@@ -102,7 +105,6 @@ if arquivo_upload:
             ax.grid(True, alpha=0.3)
             st.pyplot(fig)
 
-            # Estruturação do PDF
             img_buf = io.BytesIO()
             fig.savefig(img_buf, format='png', dpi=200)
             img_buf.seek(0)
