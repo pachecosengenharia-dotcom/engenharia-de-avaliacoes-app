@@ -3,43 +3,46 @@ import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-st.title("📊 Engenharia de Avaliações - Debug Final")
+st.set_page_config(layout="wide")
+st.title("📊 Engenharia de Avaliações - Goiânia")
 
 try:
-    # 1. Leitura com tratamento de separador
+    # 1. Leitura
     df = pd.read_csv("Goiânia - GO.csv", sep=";", encoding='latin-1')
     df.columns = [c.strip() for c in df.columns]
-    
-    st.write("Total de linhas originais:", len(df))
-    
-    # 2. Limpeza Manual dos dados (substituir vírgula por ponto e remover caracteres)
-    # Selecionamos todas as colunas que não são texto puro
+
+    # 2. SEPARAÇÃO INTELIGENTE: Só processamos colunas que podem ser números
+    # Criamos um DataFrame apenas com colunas numéricas para o cálculo
+    df_numerico = pd.DataFrame()
     for col in df.columns:
-        if df[col].dtype == 'object':
-            # Removemos R$, espaços, e tratamos pontos/vírgulas
-            df[col] = df[col].astype(str).str.replace('R$', '', regex=False)
-            df[col] = df[col].astype(str).str.replace('.', '', regex=False)
-            df[col] = df[col].astype(str).str.replace(',', '.', regex=False)
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+        # Tenta converter para número, o que for texto vira NaN
+        col_convertida = pd.to_numeric(df[col].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce')
+        if col_convertida.notna().sum() > 0: # Se tiver pelo menos um número
+            df_numerico[col] = col_convertida
+
+    df_numerico = df_numerico.dropna()
     
-    # 3. Diagnóstico crucial: quantas linhas sobram após a limpeza?
-    df_limpo = df.dropna()
-    st.write("Linhas após limpeza (dropna):", len(df_limpo))
+    # 3. Definição do alvo (assumindo que a coluna de valor contém 'Valor' ou 'Preco')
+    col_valor = [c for c in df_numerico.columns if 'Valor' in c or 'Preco' in c][0]
+    features = [c for c in df_numerico.columns if c != col_valor]
     
-    if len(df_limpo) == 0:
-        st.error("O modelo não encontrou dados válidos. Provavelmente os números no seu CSV não estão a ser convertidos.")
-        st.write("Amostra do que sobrou antes do dropna:", df.head())
-    else:
-        # 4. Regressão (apenas se houver dados)
-        target = 'Valor Total'
-        features = [c for c in df_limpo.columns if c != target and c != 'Index'] # Ajuste o nome da coluna alvo se necessário
-        
-        X = df_limpo[features]
-        y = df_limpo[target]
-        modelo = LinearRegression().fit(X, y)
-        
-        st.success("Modelo treinado com sucesso!")
-        st.write("Variáveis usadas:", features)
+    st.write("Colunas numéricas processadas:", features)
+
+    # 4. Regressão Linear
+    X = df_numerico[features]
+    y = df_numerico[col_valor]
+    modelo = LinearRegression().fit(X, y)
+
+    # 5. Interface
+    st.sidebar.header("Dados do Imóvel")
+    inputs = {}
+    for col in features:
+        inputs[col] = st.sidebar.number_input(f"{col}", value=float(df_numerico[col].median()))
+
+    # 6. Cálculo
+    pred = modelo.predict([list(inputs.values())])
+    st.metric("Valor Estimado", f"R$ {pred[0]:,.2f}")
 
 except Exception as e:
-    st.error(f"Erro: {e}")
+    st.error(f"Erro no processamento: {e}")
+    st.info("O sistema tentou processar apenas colunas numéricas, mas algo correu mal.")
