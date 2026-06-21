@@ -9,20 +9,23 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
 st.set_page_config(layout="wide")
-st.title("📊 Engenharia de Avaliações - Laudo Técnico Completo")
+st.title("📊 Engenharia de Avaliações - Laudo Técnico")
 
 arquivos = [f for f in os.listdir('.') if f.endswith('.csv')]
 regiao = st.sidebar.selectbox("Selecione a Região:", arquivos)
 
-def gerar_pdf(pred_unit, pred_total, minimo, maximo, eq_str):
+def gerar_pdf(regiao, pred_unit, pred_total, minimo, maximo, eq_str, features, n_amostras):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
     c.setFont("Helvetica-Bold", 16)
-    c.drawString(50, 800, "Laudo Técnico de Avaliação Imobiliária")
+    c.drawString(50, 800, "LAUDO TÉCNICO DE AVALIAÇÃO")
     c.setFont("Helvetica", 12)
-    c.drawString(50, 770, f"Equação: {eq_str}")
-    c.drawString(50, 740, f"V.U. Mínimo: R$ {minimo:,.2f} | Médio: R$ {pred_unit:,.2f} | Máximo: R$ {maximo:,.2f}")
-    c.drawString(50, 710, f"Valor Total Estimado: R$ {pred_total:,.2f}")
+    c.drawString(50, 770, f"Região: {regiao} | Amostras: {n_amostras}")
+    c.drawString(50, 740, f"Equação: {eq_str}")
+    c.drawString(50, 710, f"V.U. Médio: R$ {pred_unit:,.2f}")
+    c.drawString(50, 695, f"Intervalo: R$ {minimo:,.2f} a R$ {maximo:,.2f}")
+    c.drawString(50, 665, f"Valor Total: R$ {pred_total:,.2f}")
+    c.drawString(50, 630, "Variáveis: " + ", ".join(features))
     c.save()
     buffer.seek(0)
     return buffer
@@ -30,41 +33,42 @@ def gerar_pdf(pred_unit, pred_total, minimo, maximo, eq_str):
 if regiao:
     try:
         df = pd.read_csv(regiao, sep=";", encoding='latin-1')
-        df.columns = [c.strip() for c in df.columns]
-
-        col_alvo = 'Valor Unitário'
-        # Ajuste: Excluímos explicitamente 'Valor Total' da lista de variáveis de entrada (features)
-        excluir_variaveis = [col_alvo, 'Valor Total', 'Valor Total Estimado']
-        features = [c for c in df.columns if c not in excluir_variaveis and pd.to_numeric(df[c].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce').notna().sum() > len(df)*0.5]
-
-        df_modelo = df[features + [col_alvo]].apply(lambda x: pd.to_numeric(x.astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce'))
+        df.columns = df.columns.str.strip()
+        
+        col_alvo = "Valor Unitário"
+        
+        # EXCLUIR "Valor Total" e outros não numéricos das entradas
+        excluir = ['Valor Total', 'Valor Total Estimado', 'Idade Aparente', 'Endereço', 'Complemento', 'Bairro', 'Informante', 'Telefone', 'Data do Evento']
+        features = [c for c in df.columns if c != col_alvo and c not in excluir]
+        if 'Setor urbano' not in features: features.append('Setor urbano')
+        
+        # Converte apenas as colunas selecionadas
+        df_modelo = df[features + [col_alvo]].apply(lambda x: pd.to_numeric(x.astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce'))
         df_modelo = df_modelo.dropna()
 
         if not df_modelo.empty:
-            X = df_modelo[features]
-            y = df_modelo[col_alvo]
+            X, y = df_modelo[features], df_modelo[col_alvo]
             modelo = LinearRegression().fit(X, y)
             
-            # Equação
-            intercept = modelo.intercept_
-            eq_str = f"V.U. = {intercept:.2f} " + " ".join([f"+ ({c:.2f} * {n})" for n, c in zip(features, modelo.coef_)])
-            st.subheader("Equação do Modelo")
+            eq_str = f"VU = {modelo.intercept_:.2f}"
             st.latex(eq_str)
-
-            # Cálculos
+            
             st.sidebar.header("⚙️ Parâmetros do Imóvel")
             inputs = [st.sidebar.number_input(f"{n}", value=float(df_modelo[n].median())) for n in features]
             pred_unit = modelo.predict([inputs])[0]
+            
+            # Cálculo do valor total apenas para exibição
+            area = inputs[features.index('Área Privativa')] if 'Área Privativa' in features else 1
+            pred_total = pred_unit * area
+            
+            minimo, maximo = pred_unit * 0.90, pred_unit * 1.10
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("V.U. Mínimo", f"R$ {minimo:,.2f}")
+            c2.metric("V.U. Médio", f"R$ {pred_unit:,.2f}")
+            c3.metric("V.U. Máximo", f"R$ {maximo:,.2f}")
+            
+            # Gráficos diagnósticos
             residuos = y - modelo.predict(X)
-            erro_padrao = np.std(residuos)
-            minimo, maximo = pred_unit - (1.96 * erro_padrao), pred_unit + (1.96 * erro_padrao)
-            
-            # Cálculo de área apenas para exibição do Valor Total, não como variável de entrada
-            col_area = next((c for c in features if 'área' in c.lower()), features[0])
-            area = inputs[features.index(col_area)] if col_area in features else 1
-            
-            col1, col2, col3 = st.columns(3)
-            col1.metric("V.U. Mínimo", f"R$ {minimo:,.2f}")
-            col2.metric("V.U. Médio", f"R$ {pred_unit:,.2f}")
-            col3.metric("V.U. Máximo", f"R$ {maximo:,.2f}")
-            st.metric("Valor Total (Médio)", f"R$ {pred_unit *
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+            ax1.scatter(y, modelo.predict(X), alpha=0.5); ax1.set_title("Aderência")
