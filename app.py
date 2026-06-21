@@ -30,30 +30,43 @@ regiao = st.sidebar.selectbox("Selecione a Região:", arquivos)
 
 
 
-def gerar_pdf(pred_unit, pred_total, minimo, maximo, eq_str):
-
+def gerar_pdf(regiao, pred_unit, pred_total, minimo, maximo, eq_str, features, n_amostras):
     buffer = io.BytesIO()
-
     c = canvas.Canvas(buffer, pagesize=A4)
-
+    
+    # Cabeçalho Formal
     c.setFont("Helvetica-Bold", 16)
-
-    c.drawString(50, 800, "Laudo Técnico de Avaliação Imobiliária")
-
+    c.drawString(50, 820, "LAUDO TÉCNICO DE AVALIAÇÃO IMOBILIÁRIA")
+    c.line(50, 810, 550, 810)
+    
+    # Dados da Análise
     c.setFont("Helvetica", 12)
-
-    c.drawString(50, 770, f"Equação: {eq_str}")
-
-    c.drawString(50, 740, f"V.U. Mínimo: R$ {minimo:,.2f} | Médio: R$ {pred_unit:,.2f} | Máximo: R$ {maximo:,.2f}")
-
-    c.drawString(50, 710, f"Valor Total Estimado: R$ {pred_total:,.2f}")
-
+    c.drawString(50, 780, f"Região Analisada: {regiao}")
+    c.drawString(50, 765, f"Tamanho da Amostra: {n_amostras} imóveis")
+    
+    # Equação
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, 735, "Equação de Regressão:")
+    c.setFont("Helvetica", 10)
+    c.drawString(50, 720, eq_str)
+    
+    # Resultados
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, 680, "RESULTADOS DA AVALIAÇÃO:")
+    c.setFont("Helvetica", 12)
+    c.drawString(50, 660, f"Valor Unitário Médio: R$ {pred_unit:,.2f} / m²")
+    c.drawString(50, 645, f"Intervalo de Confiança: R$ {minimo:,.2f} a R$ {maximo:,.2f}")
+    c.drawString(50, 625, f"VALOR TOTAL ESTIMADO: R$ {pred_total:,.2f}")
+    
+    # Variáveis
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, 590, "Variáveis Consideradas:")
+    c.setFont("Helvetica", 10)
+    c.drawString(50, 575, ", ".join(features))
+    
     c.save()
-
     buffer.seek(0)
-
     return buffer
-
 
 
 if regiao:
@@ -154,11 +167,14 @@ if regiao:
 
 
 
-            # PDF
-
-            pdf_data = gerar_pdf(pred_unit, pred_unit * area, minimo, maximo, eq_str)
-
-            st.download_button("📥 Baixar Laudo Completo em PDF", data=pdf_data, file_name="laudo_avaliacao.pdf", mime="application/pdf")
+            # PDF com dados completos
+            pdf_data = gerar_pdf(regiao, pred_unit, pred_unit * area, minimo, maximo, eq_str, features, len(df_modelo))
+            st.download_button(
+                "📥 Baixar Laudo Completo em PDF", 
+                data=pdf_data, 
+                file_name=f"Laudo_{regiao.replace('.csv', '')}.pdf", 
+                mime="application/pdf"
+            )
 
         else:
 
