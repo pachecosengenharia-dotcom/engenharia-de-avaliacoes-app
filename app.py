@@ -148,65 +148,11 @@ if df is not None:
             X = df[variaveis_independentes]
             y = df['Preco']
             
+            # Escalonamento estatístico estável
             scaler = StandardScaler()
             X_scaled = scaler.fit_transform(X.values)
             
             modelo = LinearRegression().fit(X_scaled, y.values)
             
-            y_pred_todo = modelo.predict(X_scaled)
-            dados_imovel_lista = [caracteristicas_avaliando[var] for var in X.columns]
-            dados_imovel_scaled = scaler.transform(np.array([dados_imovel_lista]))
-            
-            preco_estimado = max(0, modelo.predict(dados_imovel_scaled)[0])
-            r2_score = modelo.score(X_scaled, y.values)
-            
-            limite_inferior, limite_superior = preco_estimado * 0.85, preco_estimado * 1.15
-
-            # Diagnósticos de Cook e Resíduos
-            residuos = y.values - y_pred_todo
-            mse = np.mean(residuos ** 2) if np.mean(residuos ** 2) > 0 else 1.0
-            leverage = np.ones(len(df)) * (len(variaveis_independentes) / len(df))
-            distancia_cook = (residuos ** 2 / (len(variaveis_independentes) * mse)) * (leverage / (1 - leverage) ** 2)
-            corte_cook = 4 / len(df)
-
-            # Apresentação na Tela
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Valor de Mercado Estimado", f"R$ {preco_estimado:,.2f}")
-            c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
-            c3.metric("Precisão do Modelo (R²)", f"{r2_score*100:.2f}%")
-
-            # RECONSTRUÇÃO LIMPA DA EQUAÇÃO MATEMÁTICA (Sem dízimas científicas ou poluição visual)
-            coef_originais = modelo.coef_ / scaler.scale_
-            intercept_original = modelo.intercept_ - np.sum(modelo.coef_ * scaler.mean_ / scaler.scale_)
-            
-            equacao_texto = f"Preço = {intercept_original:,.2f}"
-            for var, coef in zip(X.columns, coef_originais):
-                sinal = "+" if coef >= 0 else "-"
-                equacao_texto += f" {sinal} {abs(coef):,.2f} × {var}"
-            
-            st.info(f"📐 **Equação de Regressão Linear Múltipla:** \n`{equacao_texto}`")
-
-            # --- MATRIZ DE DIAGNÓSTICOS GRÁFICOS ---
-            fig, axs = plt.subplots(2, 2, figsize=(11, 7.5))
-            plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
-
-            # 1. Dispersão Real
-            axs[0,0].scatter(df['Area_Construida'].values, df['Preco'].values, color='#002d62', alpha=0.5, label="Amostras")
-            axs[0,0].scatter([caracteristicas_avaliando['Area_Construida']], [preco_estimado], color='#d9534f', s=130, marker='*', zorder=5, label="Avaliando")
-            axs[0,0].set_title("Dispersão: Preço vs Área", fontsize=10, weight='bold', color='#002d62')
-            axs[0,0].set_xlabel("Área Construída (m²)")
-            axs[0,0].set_ylabel("Preço (R$)")
-            axs[0,0].legend(fontsize=8)
-
-            # 2. Aderência Real
-            axs[0,1].scatter(y.values, y_pred_todo, color='#002d62', alpha=0.5)
-            axs[0,1].plot([y.min(), y.max()], [y.min(), y.max()], 'r--', lw=1.5, label="Aderência Ideal")
-            axs[0,1].set_title("Gráfico de Aderência (Real vs Estimado)", fontsize=10, weight='bold', color='#002d62')
-            axs[0,1].set_xlabel("Preço Real (R$)")
-            axs[0,1].set_ylabel("Preço Estimado (R$)")
-            axs[0,1].legend(fontsize=8)
-
-            # 3. Cook
-            axs[1,0].stem(np.arange(len(distancia_cook)), distancia_cook, markerfmt=' ', linefmt='#002d62')
-            axs[1,0].axhline(corte_cook, color='#d9534f', linestyle='--', lw=1.5, label="Limite (4/n)")
-            axs[1,0].set_title("Distância de
+            # Previsões usando dados na escala correta
+            y_pred_todo
