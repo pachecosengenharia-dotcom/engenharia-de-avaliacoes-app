@@ -2,11 +2,11 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
+import matplotlib.pyplot as plt
 import io
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
-import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
 st.title("📊 AVM - Engenharia de Avaliações")
@@ -14,10 +14,10 @@ st.title("📊 AVM - Engenharia de Avaliações")
 def gerar_laudo_pdf(d, fig, eq_str, inputs):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
-    # Usando fonte 'Helvetica' padrão que não gera tarjas pretas
     c.setFont("Helvetica", 10)
-    c.drawString(50, 800, "Laudo Técnico de Avaliação Imobiliária")
+    c.drawString(50, 800, "Laudo Técnico de Avaliação (NBR 14653)")
     c.drawString(50, 780, f"V.U. Médio: R$ {d['vu']:,.2f} | Total: R$ {d['total']:,.2f}")
+    c.drawString(50, 765, f"Intervalo 95%: R$ {d['min']:,.2f} a R$ {d['max']:,.2f}")
     
     img_buf = io.BytesIO()
     fig.savefig(img_buf, format='png')
@@ -31,7 +31,6 @@ if arquivo:
     raw_data = arquivo.getvalue().decode('latin-1')
     sep = ';' if raw_data.count(';') > raw_data.count(',') else ','
     df = pd.read_csv(io.StringIO(raw_data), sep=sep)
-    # Limpa nomes das colunas de espaços extras
     df.columns = df.columns.str.strip()
     
     cols = df.columns.tolist()
@@ -46,22 +45,33 @@ if arquivo:
 
         if not df_c.empty:
             modelo = LinearRegression().fit(df_c[features], df_c[target])
-            st.sidebar.header("⚙️ Parâmetros")
-            inputs = {f: st.sidebar.number_input(f, value=float(df_c[f].median())) for f in features}
+            # Equação
+            eq_str = f"{target} = {modelo.intercept_:.2f} " + " ".join([f"+ ({c:.2f}*{n})" for n, c in zip(features, modelo.coef_)])
+            st.latex(eq_str)
+            
+            # Gráficos
+            preds = modelo.predict(df_c[features])
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3))
+            ax1.scatter(df_c[target], preds); ax1.set_title("Aderência")
+            ax2.scatter(preds, df_c[target] - preds); ax2.axhline(0, color='red'); ax2.set_title("Resíduos")
+            st.pyplot(fig)
+
+            # Parâmetros e Limites NBR
+            st.sidebar.header("⚙️ Parâmetros (Limites)")
+            inputs = {f: st.sidebar.number_input(f"{f} ({df_c[f].min():.1f} a {df_c[f].max():.1f})", value=float(df_c[f].median())) for f in features}
             
             if st.sidebar.button("Calcular Precificação"):
                 vu = modelo.predict(np.array([list(inputs.values())]))[0]
-                preds = modelo.predict(df_c[features])
                 std = np.std(df_c[target] - preds)
+                min_v, max_v = vu - (1.96 * std), vu + (1.96 * std)
                 
-                # Busca por área de forma mais flexível
                 col_area = next((c for c in features if 'area' in c.lower() or 'área' in c.lower()), None)
                 total = vu * inputs[col_area] if col_area else vu
                 
+                c1, c2, c3 = st.columns(3)
+                c1.metric("V.U. Mínimo", f"R$ {min_v:,.2f}")
+                c2.metric("V.U. Médio", f"R$ {vu:,.2f}")
+                c3.metric("V.U. Máximo", f"R$ {max_v:,.2f}")
                 st.metric("Valor Total Estimado", f"R$ {total:,.2f}")
                 
-                fig, ax = plt.subplots()
-                ax.scatter(df_c[target], preds)
-                
-                pdf = gerar_laudo_pdf({'vu': vu, 'total': total}, fig, "eq", inputs)
-                st.download_button("📥 Baixar Laudo", pdf, "laudo.pdf")
+                pdf = gerar_laudo_pdf({'vu': vu, 'min': min_v, 'max':
