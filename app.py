@@ -3,46 +3,57 @@ import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-st.set_page_config(page_title="Engenharia de Avaliações", layout="wide")
+st.set_page_config(layout="wide")
 st.title("📊 Engenharia de Avaliações - Goiânia")
 
+# Função de limpeza extrema para garantir que o numpy não reclame
+def limpar_valor(valor):
+    try:
+        if pd.isna(valor): return 0.0
+        s = str(valor).replace('R$', '').replace('.', '').replace(',', '.')
+        return float(s)
+    except:
+        return 0.0
+
 try:
-    # 1. Leitura robusta com tratamento de acentos
+    # 1. Leitura com encoding para aceitar acentos
     df = pd.read_csv("Goiânia - GO.csv", sep=";", encoding='latin-1')
-    
-    # 2. Limpeza de colunas (retirar espaços extras)
     df.columns = [c.strip() for c in df.columns]
     
-    # 3. Definição das colunas de trabalho
-    # Verifique se os nomes abaixo coincidem exatamente com o seu ficheiro
-    features = ['Área Privativa', 'Quartos', 'Suite']
-    target = 'Valor Total'
+    # 2. Mapeamento das colunas (Ajuste se necessário)
+    col_area = 'Área Privativa'
+    col_quartos = 'Quartos'
+    col_suites = 'Suite'
+    col_valor = 'Valor Total'
     
-    # 4. Limpeza de dados (Converter texto com vírgulas para números decimais)
-    for col in features + [target]:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.replace('.', '').str.replace(',', '.').astype(float)
+    # 3. Limpeza forçada dos dados
+    df[col_area] = df[col_area].apply(limpar_valor)
+    df[col_quartos] = df[col_quartos].apply(limpar_valor)
+    df[col_suites] = df[col_suites].apply(limpar_valor)
+    df[col_valor] = df[col_valor].apply(limpar_valor)
     
-    df = df.dropna()
+    # Filtrar apenas linhas com valor real
+    df = df[df[col_valor] > 0]
     
-    # 5. Regressão Linear Pura
-    X = df[features]
-    y = df[target]
+    # 4. Treino do Modelo
+    X = df[[col_area, col_quartos, col_suites]]
+    y = df[col_valor]
     modelo = LinearRegression().fit(X, y)
     
-    # 6. Interface de input
-    st.sidebar.header("Características do Imóvel")
-    area = st.sidebar.number_input("Área Privativa (m²)", value=float(df['Área Privativa'].mean()))
-    quartos = st.sidebar.slider("Quartos", 1, 5, 2)
-    suites = st.sidebar.slider("Suítes", 0, 5, 1)
+    # 5. Interface
+    st.sidebar.header("Dados do Imóvel")
+    area_input = st.sidebar.number_input("Área Privativa (m²)", value=float(df[col_area].mean()))
+    quartos_input = st.sidebar.slider("Quartos", 1, 5, 2)
+    suites_input = st.sidebar.slider("Suítes", 0, 5, 1)
     
-    # 7. Cálculo e Exibição
-    pred = modelo.predict([[area, quartos, suites]])
+    pred = modelo.predict([[area_input, quartos_input, suites_input]])
     
-    st.metric("Valor de Mercado Estimado", f"R$ {pred[0]:,.2f}")
+    st.metric("Valor Estimado", f"R$ {pred[0]:,.2f}")
     
-    st.success("Modelo carregado com sucesso!")
-    
+    # Exibir resumo dos dados para garantir que nada foi perdido
+    st.write("Resumo dos dados processados:")
+    st.dataframe(df.head())
+
 except Exception as e:
     st.error(f"Erro no processamento: {e}")
-    st.info("Dica: Verifique se o ficheiro 'Goiânia - GO.csv' está na pasta raiz do repositório.")
+    st.info("Verifique se as colunas no CSV têm exatamente os nomes: 'Área Privativa', 'Quartos', 'Suite' e 'Valor Total'.")
