@@ -18,16 +18,35 @@ def normalizar(texto):
 def gerar_laudo_pdf(d, fig, eq_str, inputs):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, 820, "Laudo Tecnico Completo (NBR 14653)")
+    
     c.setFont("Helvetica", 10)
-    c.drawString(50, 800, "Laudo Tecnico (NBR 14653)")
-    c.drawString(50, 780, f"Equacao: {eq_str[:80]}...")
-    c.drawString(50, 760, f"Min: R$ {d['min']:,.2f} | Medio: R$ {d['vu']:,.2f} | Max: R$ {d['max']:,.2f}")
-    c.drawString(50, 745, f"Valor Total: R$ {d['total']:,.2f}")
+    # Equação com quebra de linha manual
+    c.drawString(50, 790, "Equacao do Modelo:")
+    y = 775
+    for i in range(0, len(eq_str), 80):
+        c.drawString(50, y, eq_str[i:i+80])
+        y -= 15
+    
+    # Variáveis e seus valores
+    y -= 10
+    c.drawString(50, y, "Variaveis utilizadas no modelo:")
+    y -= 15
+    for k, v in inputs.items():
+        c.drawString(60, y, f"- {k.capitalize()}: {v:.2f}")
+        y -= 15
+        
+    # Resultados
+    y -= 20
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(50, y, f"Resultado: Min (R$ {d['min']:,.2f}) | Medio (R$ {d['vu']:,.2f}) | Max (R$ {d['max']:,.2f})")
+    c.drawString(50, y-20, f"Valor Total Estimado: R$ {d['total']:,.2f}")
     
     img_buf = io.BytesIO()
     fig.savefig(img_buf, format='png')
     img_buf.seek(0)
-    c.drawImage(ImageReader(img_buf), 50, 400, width=400, height=200)
+    c.drawImage(ImageReader(img_buf), 50, y-250, width=400, height=200)
     c.save(); buffer.seek(0)
     return buffer
 
@@ -53,28 +72,20 @@ if arquivo:
             eq_str = f"{target} = {modelo.intercept_:.2f} " + " ".join([f"+ ({c:.2f}*{n})" for n, c in zip(features, modelo.coef_)])
             st.latex(eq_str)
             
-            preds = modelo.predict(df_c[features])
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3))
-            ax1.scatter(df_c[target], preds); ax1.set_title("Aderencia")
-            ax2.scatter(preds, df_c[target] - preds); ax2.axhline(0, color='red'); ax2.set_title("Residuos")
+            ax1.scatter(df_c[target], modelo.predict(df_c[features])); ax1.set_title("Aderencia")
+            ax2.scatter(modelo.predict(df_c[features]), df_c[target] - modelo.predict(df_c[features])); ax2.axhline(0, color='red'); ax2.set_title("Residuos")
             st.pyplot(fig)
 
-            st.sidebar.header("⚙️ Parametros")
-            inputs = {f: st.sidebar.number_input(f, value=float(df_c[f].median())) for f in features}
+            st.sidebar.header("⚙️ Limites de Extrapolacao")
+            inputs = {}
+            for f in features:
+                # Mostra o limite na tela para o usuário saber onde está
+                min_val, max_val = df_c[f].min(), df_c[f].max()
+                inputs[f] = st.sidebar.number_input(f"{f} (Min: {min_val:.1f} | Max: {max_val:.1f})", value=float(df_c[f].median()))
             
             if st.sidebar.button("Calcular Precificacao"):
                 vu = modelo.predict(np.array([list(inputs.values())]))[0]
-                std = np.std(df_c[target] - preds)
+                std = np.std(df_c[target] - modelo.predict(df_c[features]))
                 min_v, max_v = vu - (1.96 * std), vu + (1.96 * std)
-                col_area = next((c for c in features if 'area' in c), None)
-                total = vu * inputs[col_area] if col_area else vu
-                
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Minimo", f"R$ {min_v:,.2f}")
-                c2.metric("Medio", f"R$ {vu:,.2f}")
-                c3.metric("Maximo", f"R$ {max_v:,.2f}")
-                st.metric("Valor Total Estimado", f"R$ {total:,.2f}")
-                
-                # Botão de download do laudo completo
-                pdf = gerar_laudo_pdf({'vu': vu, 'min': min_v, 'max': max_v, 'total': total}, fig, eq_str, inputs)
-                st.download_button("📥 Baixar Laudo Completo", pdf, "laudo_tecnico.pdf")
+                col_area = next((
