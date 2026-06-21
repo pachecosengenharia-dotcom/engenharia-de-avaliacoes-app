@@ -66,31 +66,40 @@ if arquivo_csv is not None:
     # Remove linhas com valores vazios na coluna alvo
     df_clean = df_clean.dropna(subset=[col_alvo])
     
-    # 4. Modelagem
-    # 3. Modelagem Robusta (Substitua por este bloco)
+  # 3. Modelagem Robusta (Versão Final para o seu CSV)
+    # Lista das colunas que SÃO NÚMEROS e devem entrar no modelo:
+    cols_numericas = [
+        'Área Privativa', 'Área do Terreno', 'Quartos', 'Evento', 
+        'Padrão de Acabamento', 'Suite', 'Estado de Conservação', 
+        'Idade Aparente', 'Setor urbano', 'Data do Evento', 'Valor Total'
+    ]
     col_alvo = 'Valor Unitário'
     
-    # 1. Converter tudo para numérico, forçando erro para o que não for número (vira NaN)
-    df_numerico = df.apply(pd.to_numeric, errors='coerce')
+    df_clean = df.copy()
     
-    # 2. Adicionar o Valor Unitário de volta (pois ele tem vírgulas e foi convertido acima)
-    df[col_alvo] = df[col_alvo].astype(str).str.replace(',', '.').astype(float)
-    df_numerico[col_alvo] = df[col_alvo]
+    # Função para limpar e converter números (trata a vírgula do seu CSV)
+    def converter_num(valor):
+        valor_str = str(valor).replace('.', '').replace(',', '.')
+        try:
+            return float(valor_str)
+        except:
+            return np.nan
+
+    # Aplica conversão apenas nas colunas necessárias
+    for col in cols_numericas + [col_alvo]:
+        if col in df_clean.columns:
+            df_clean[col] = df_clean[col].apply(converter_num)
     
-    # 3. Remover colunas que ficaram vazias (que eram texto puro)
-    df_final = df_numerico.dropna(axis=1, how='all')
+    # Remove qualquer linha que tenha ficado vazia (NaN)
+    df_clean = df_clean.dropna(subset=cols_numericas + [col_alvo])
     
-    # 4. Remover linhas vazias
-    df_final = df_final.dropna()
+    # Define X (variáveis) e y (alvo)
+    X = df_clean[cols_numericas]
+    y = df_clean[col_alvo]
     
-    # 5. Definir X e Y
-    features = [c for c in df_final.columns if c != col_alvo]
-    X = df_final[features]
-    y = df_final[col_alvo]
-    
-    # 6. Fit
+    # Ajuste do Modelo
     modelo = LinearRegression().fit(X, y)
-    st.success(f"Modelo treinado com sucesso com as variáveis: {features}")
+    st.success("Modelo treinado com sucesso!")
     
     if X.empty or y.empty:
         st.error("Erro: Dados insuficientes ou inválidos após a limpeza.")
