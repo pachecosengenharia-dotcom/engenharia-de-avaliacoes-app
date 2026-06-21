@@ -10,30 +10,61 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 import io
 import re
+import os
 
 st.set_page_config(page_title="Engenharia de Avaliações", layout="wide")
 
 st.title("📊 Sistema Profissional de Engenharia de Avaliações")
-st.markdown("Insira sua planilha de mercado e ajuste os parâmetros para calcular o valor de mercado.")
+st.markdown("Selecione uma região salva no repositório ou insira uma nova planilha de mercado.")
 
-# Barra Lateral - Upload dos Dados
+# --- GERENCIAMENTO DE BANCO DE DADOS (LOCAL OU UPLOAD) ---
 st.sidebar.header("📁 Base de Dados")
-arquivo_upload = st.sidebar.file_uploader("Arraste sua planilha (.csv)", type=["csv"])
 
-if arquivo_upload:
+# Verifica se existe a pasta 'dados' com planilhas salvas
+PASTA_DADOS = "dados"
+planilhas_disponiveis = []
+
+if os.path.exists(PASTA_DADOS):
+    planilhas_disponiveis = [f for f in os.listdir(PASTA_DADOS) if f.endswith('.csv')]
+
+# Menu de seleção de região
+fonte_dados = st.sidebar.selectbox(
+    "Escolha a Região/Município",
+    options=["Selecionar região salva..."] + planilhas_disponiveis + ["Fazer Upload Manual (.csv)"]
+)
+
+arquivo_alvo = None
+df = None
+
+# Lógica para carregar o arquivo correto
+if fonte_dados and fonte_dados != "Selecionar região salva..." and fonte_dados != "Fazer Upload Manual (.csv)":
+    caminho_arquivo = os.path.join(PASTA_DADOS, fonte_dados)
     try:
-        df = pd.read_csv(arquivo_upload, delimiter=';', encoding='latin-1')
+        df = pd.read_csv(caminho_arquivo, delimiter=';', encoding='latin-1')
         if len(df.columns) <= 1:
+            df = pd.read_csv(caminho_arquivo, delimiter=',', encoding='latin-1')
+        st.sidebar.success(f"📍 Região carregada: {fonte_dados.replace('.csv', '')}")
+    except Exception as e:
+        st.sidebar.error(f"Erro ao carregar {fonte_dados}: {e}")
+
+elif fonte_dados == "Fazer Upload Manual (.csv)":
+    arquivo_upload = st.sidebar.file_uploader("Arraste sua planilha (.csv)", type=["csv"])
+    if arquivo_upload:
+        try:
+            df = pd.read_csv(arquivo_upload, delimiter=';', encoding='latin-1')
+            if len(df.columns) <= 1:
+                df = pd.read_csv(arquivo_upload, delimiter=',', encoding='latin-1')
+        except:
             df = pd.read_csv(arquivo_upload, delimiter=',', encoding='latin-1')
-    except:
-        df = pd.read_csv(arquivo_upload, delimiter=',', encoding='latin-1')
-        
+
+# --- PROCESSAMENTO DOS DADOS ---
+if df is not None:
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
 
     # Limpeza simples e segura das colunas (remove espaços nas pontas)
     df.columns = df.columns.astype(str).str.strip()
 
-    # Dicionário calibrado com os cabeçalhos reais da sua planilha
+    # Dicionário calibrado com os cabeçalhos reais das planilhas de Engenharia de Avaliações
     colunas_possiveis = {
         'Preco': ['Preco', 'Preço', 'Valor', 'Vlr', 'PRECO', 'PREÇO', 'Valor Total', 'Valor_Total'],
         'Area_Construida': ['Area_Construida', 'Área_Construída', 'Area Construida', 'Área Construída', 'Area Const', 'Área Const', 'AREA_CONSTRUIDA', 'Área Privativa', 'Area Privativa'],
@@ -56,36 +87,30 @@ if arquivo_upload:
 
     # Obrigatoriedades mínimas
     if 'Preco' not in df.columns or 'Area_Construida' not in df.columns:
-        st.error(f"Não mapeamos as colunas essenciais (Preco e Area_Construida). Verifique se os nomes das colunas na sua planilha batem com as esperadas. Colunas atuais: {list(df.columns)}")
+        st.error(f"Não mapeamos as colunas essenciais (Preco e Area_Construida). Colunas atuais detectadas: {list(df.columns)}")
     else:
         todas_vars = ['Area_Construida', 'Area_Terreno', 'Quartos', 'Suites', 'Vagas', 'Conservacao', 'Padrao_Acabamento', 'Setor_Urbano', 'Data_Evento', 'Evento']
         variaveis_independentes = [v for v in todas_vars if v in df.columns]
 
-        # NOVA FUNÇÃO DE LIMPEZA DE NÚMEROS: Muito mais forte e adaptada para Excel brasileiro
+        # Limpeza numérica robusta adaptada para Excel brasileiro
         def limpar_numero(valor):
             txt = str(valor).strip().replace('R$', '').replace(' ', '')
             if not txt or txt.lower() in ['nan', 'null', '']: return np.nan
             
-            # Se tiver pontos e vírgula (ex: 1.500.000,00), remove os pontos e troca a vírgula por ponto
             if ',' in txt and '.' in txt:
-                if txt.find('.') < txt.find(','): # Formato 1.234,56
+                if txt.find('.') < txt.find(','):
                     txt = txt.replace('.', '')
-                else: # Formato 1,234.56
+                else:
                     txt = txt.replace(',', '')
             
-            # Se tiver apenas vírgula, muda para ponto decimal (ex: 1500,50 -> 1500.50)
             if ',' in txt and '.' not in txt:
                 txt = txt.replace(',', '.')
                 
-            # Remove qualquer outro carácter que não seja número ou o ponto decimal
             txt = re.sub(r'[^\d.]', '', txt)
-            
-            try: 
-                return float(txt)
-            except: 
-                return np.nan
+            try: return float(txt)
+            except: return np.nan
 
-        # Limpeza numérica de todas as colunas
+        # Aplicação da limpeza
         df['Preco'] = df['Preco'].astype(str).apply(limpar_numero)
         for col in variaveis_independentes:
             df[col] = df[col].astype(str).apply(limpar_numero)
@@ -94,7 +119,6 @@ if arquivo_upload:
             else:
                 df[col] = df[col].fillna(df[col].median() if not df[col].isnull().all() else 1.0)
 
-        # Remove linhas com valores nulos nas colunas principais
         df = df.dropna(subset=['Preco', 'Area_Construida'])
 
         # Painel de Controle Lateral Dinâmico
@@ -116,7 +140,6 @@ if arquivo_upload:
         if 'Padrao_Acabamento' in variaveis_independentes:
             caracteristicas_avaliando['Padrao_Acabamento'] = st.sidebar.selectbox("Padrão de Acabamento", [1, 2, 3], index=1, format_func=lambda x: {1:"Baixo", 2:"Médio", 3:"Alto"}[x])
         
-        # Campo numérico para Setor Urbano (0 a 5000)
         if 'Setor_Urbano' in variaveis_independentes:
             try:
                 valor_inicial = float(df['Setor_Urbano'].median())
@@ -125,11 +148,7 @@ if arquivo_upload:
                 valor_inicial = 500.0
                 
             caracteristicas_avaliando['Setor_Urbano'] = st.sidebar.number_input(
-                "Setor_Urbano", 
-                min_value=0.0,
-                max_value=5000.0,
-                value=valor_inicial, 
-                step=10.0
+                "Setor_Urbano", min_value=0.0, max_value=5000.0, value=valor_inicial, step=10.0
             )
 
         if 'Data_Evento' in variaveis_independentes:
@@ -150,7 +169,7 @@ if arquivo_upload:
             r2_score = modelo.score(X.values, y.values)
             limite_inferior, limite_superior = preco_estimado * 0.85, preco_estimado * 1.15
 
-            # Exibição dos Resultados
+            # Resultados na tela
             c1, c2, c3 = st.columns(3)
             c1.metric("Valor de Mercado Estimado", f"R$ {preco_estimado:,.2f}")
             c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
@@ -158,7 +177,7 @@ if arquivo_upload:
 
             st.info(f"📐 **Variáveis processadas no cálculo multifatorial:** {', '.join(variaveis_independentes)}")
 
-            # Gráfico
+            # Gráfico de Dispersão
             fig, ax = plt.subplots(figsize=(8, 3.5))
             sns.scatterplot(data=df, x='Area_Construida', y='Preco', color='#002d62', alpha=0.6, ax=ax, label="Amostras de Mercado")
             ax.scatter([caracteristicas_avaliando['Area_Construida']], [preco_estimado], color='#d9534f', s=150, marker='*', label="Imóvel Avaliando")
@@ -191,6 +210,6 @@ if arquivo_upload:
             st.sidebar.markdown("---")
             st.sidebar.download_button(label="📥 Baixar Laudo Oficial (PDF)", data=pdf_buf, file_name="Laudo_Tecnico_Profissional.pdf", mime="application/pdf")
         else:
-            st.warning(f"⚠️ Atenção: Nenhuma linha da planilha pôde ser convertida em número. Verifique se a sua coluna 'Valor Total' possui dados válidos. Linhas identificadas: {len(df)}.")
+            st.warning(f"⚠️ Amostras numéricas insuficientes na planilha selecionada. Linhas processadas: {len(df)}.")
 else:
-    st.info("💡 Por favor, faça o upload de uma planilha .csv na barra lateral para iniciar.")
+    st.info("💡 Escolha uma região salva no menu lateral ou selecione a opção de upload manual para começar.")
