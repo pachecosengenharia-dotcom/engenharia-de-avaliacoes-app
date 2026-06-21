@@ -33,7 +33,9 @@ if regiao:
         df.columns = [c.strip() for c in df.columns]
 
         col_alvo = 'Valor Unitário'
-        features = [c for c in df.columns if c != col_alvo and pd.to_numeric(df[c].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce').notna().sum() > len(df)*0.5]
+        # Ajuste: Excluímos explicitamente 'Valor Total' da lista de variáveis de entrada (features)
+        excluir_variaveis = [col_alvo, 'Valor Total', 'Valor Total Estimado']
+        features = [c for c in df.columns if c not in excluir_variaveis and pd.to_numeric(df[c].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce').notna().sum() > len(df)*0.5]
 
         df_modelo = df[features + [col_alvo]].apply(lambda x: pd.to_numeric(x.astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce'))
         df_modelo = df_modelo.dropna()
@@ -56,30 +58,13 @@ if regiao:
             residuos = y - modelo.predict(X)
             erro_padrao = np.std(residuos)
             minimo, maximo = pred_unit - (1.96 * erro_padrao), pred_unit + (1.96 * erro_padrao)
-            area = inputs[features.index(next((c for c in features if 'área' in c.lower()), features[0]))]
+            
+            # Cálculo de área apenas para exibição do Valor Total, não como variável de entrada
+            col_area = next((c for c in features if 'área' in c.lower()), features[0])
+            area = inputs[features.index(col_area)] if col_area in features else 1
             
             col1, col2, col3 = st.columns(3)
             col1.metric("V.U. Mínimo", f"R$ {minimo:,.2f}")
             col2.metric("V.U. Médio", f"R$ {pred_unit:,.2f}")
             col3.metric("V.U. Máximo", f"R$ {maximo:,.2f}")
-            st.metric("Valor Total (Médio)", f"R$ {pred_unit * area:,.2f}")
-
-            # Diagnóstico estatístico
-            n, p = len(y), len(features) + 1
-            X_mat = np.column_stack([np.ones(n), X])
-            leverage = np.diag(X_mat @ np.linalg.inv(X_mat.T @ X_mat) @ X_mat.T)
-            cooks_dist = (residuos**2 / (p * np.var(residuos))) * (leverage / (1 - leverage)**2)
-            
-            fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
-            ax1.scatter(y, modelo.predict(X), alpha=0.5); ax1.set_title("Aderência (Obs vs Prev)")
-            ax2.scatter(modelo.predict(X), residuos, alpha=0.5, color='orange'); ax2.axhline(0, color='black', linestyle='--'); ax2.set_title("Resíduos")
-            ax3.stem(cooks_dist); ax3.set_title("Distância de Cook (Influência)")
-            st.pyplot(fig)
-
-            # PDF
-            pdf_data = gerar_pdf(pred_unit, pred_unit * area, minimo, maximo, eq_str)
-            st.download_button("📥 Baixar Laudo Completo em PDF", data=pdf_data, file_name="laudo_avaliacao.pdf", mime="application/pdf")
-        else:
-            st.error("Dados insuficientes.")
-    except Exception as e:
-        st.error(f"Erro: {e}")
+            st.metric("Valor Total (Médio)", f"R$ {pred_unit *
