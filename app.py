@@ -7,7 +7,27 @@ import pdfplumber
 from sklearn.linear_model import LinearRegression
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
+# --- LOGICA DE TRATAMENTO ANTES DO FIT ---
+# 1. Garante que X e y sejam numéricos e remove linhas com valores faltantes
+df_clean = df.copy()
 
+# Converte todas as colunas de X para numérico, forçando erro para NaN
+for col in features:
+    df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
+
+# Remove linhas onde qualquer dado essencial é nulo
+df_clean = df_clean.dropna(subset=features + [col_alvo])
+
+# Atualiza X e y com os dados limpos
+X = df_clean[features]
+y = df_clean[col_alvo]
+
+# 2. Validação extra: checa se ainda restaram dados após a limpeza
+if not X.empty and not y.empty:
+    modelo = LinearRegression().fit(X, y)
+else:
+    st.error("Erro: A base de dados contém valores não numéricos ou está vazia após a limpeza.")
+    st.stop() # Para o app aqui e evita o erro
 # --- 1. FUNÇÕES AUXILIARES DE ENGENHARIA ---
 def extrair_atributos_do_texto(texto):
     """Extrai área e dados básicos via Regex."""
