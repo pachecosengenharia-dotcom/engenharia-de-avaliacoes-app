@@ -3,46 +3,44 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression
 import os
 
-st.title("📊 Engenharia de Avaliações")
+st.title("📊 Engenharia de Avaliações - Modo de Segurança")
 
-# Verifica arquivos disponíveis
+# Busca arquivos
 arquivos = [f for f in os.listdir('.') if f.endswith('.csv')]
 regiao = st.sidebar.selectbox("Selecione a Região:", arquivos)
 
 if regiao:
     try:
-        # Leitura básica
-        df = pd.read_csv(regiao, sep=';', encoding='latin-1')
+        # Leitura bruta forçando formato
+        df = pd.read_csv(regiao, sep=";", encoding='latin-1')
         df.columns = df.columns.str.strip()
         
-        # Filtro de coluna alvo
-        col_alvo = "Valor Unitário"
+        # Filtra apenas o que é número, ignora erros
+        for col in df.columns:
+            df[col] = pd.to_numeric(df[col].astype(str).str.replace('.','').str.replace(',','.'), errors='coerce')
         
-        if col_alvo not in df.columns:
-            st.error(f"Coluna '{col_alvo}' não encontrada. Colunas presentes: {df.columns.tolist()}")
+        df = df.dropna()
+        
+        if not df.empty:
+            # Assume que a última coluna é o Valor Unitário
+            col_alvo = df.columns[-1]
+            features = [c for c in df.columns if c != col_alvo]
+            
+            X = df[features]
+            y = df[col_alvo]
+            
+            modelo = LinearRegression().fit(X, y)
+            
+            st.write(f"Modelo treinado com {len(df)} amostras.")
+            st.write(f"Variável alvo: {col_alvo}")
+            
+            st.sidebar.header("Parâmetros")
+            inputs = [st.sidebar.number_input(f"{n}", value=float(df[n].median())) for n in features]
+            
+            pred = modelo.predict([inputs])[0]
+            st.metric("Resultado Estimado", f"R$ {pred:,.2f}")
         else:
-            # Seleção de variáveis numéricas
-            features = [c for c in df.columns if c != col_alvo and df[c].dtype != 'object']
+            st.error("O arquivo está vazio ou sem dados numéricos.")
             
-            # Limpeza de dados
-            df_modelo = df[features + [col_alvo]].dropna()
-            
-            if not df_modelo.empty:
-                X = df_modelo[features]
-                y = df_modelo[col_alvo]
-                
-                # Modelo
-                modelo = LinearRegression().fit(X, y)
-                
-                # Interface de Input
-                st.sidebar.header("Parâmetros do Imóvel")
-                inputs = [st.sidebar.number_input(f"{n}", value=float(df_modelo[n].median())) for n in features]
-                
-                # Previsão
-                pred = modelo.predict([inputs])[0]
-                st.metric("Valor Unitário Estimado", f"R$ {pred:,.2f}")
-                st.success("Cálculo realizado com sucesso!")
-            else:
-                st.error("Dados insuficientes para o cálculo.")
     except Exception as e:
-        st.error(f"Erro no sistema: {e}")
+        st.error(f"Erro crítico: {e}")
