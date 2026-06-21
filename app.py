@@ -2,62 +2,36 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
-import matplotlib.pyplot as plt
-import seaborn as sns
 
-st.set_page_config(layout="wide")
-st.title("📊 Engenharia de Avaliações - Goiânia")
+st.title("📊 Diagnóstico de Dados - Engenharia de Avaliações")
 
 try:
+    # 1. Leitura
     df = pd.read_csv("Goiânia - GO.csv", sep=";", encoding='latin-1')
     df.columns = [c.strip() for c in df.columns]
-
-    # 1. FILTRAGEM DE COLUNAS: Ignorar o que não é útil
-    # Removemos colunas que claramente não são numéricas ou relevantes
-    colunas_para_ignorar = ['Telefone', 'Nome', 'Endereço', 'Link', 'Data']
-    df_util = df.drop(columns=[c for c in colunas_para_ignorar if c in df.columns])
-
-    # 2. Conversão segura para numérico
-    def tratar_numeros(col):
-        # Transforma em string, limpa formato moeda, converte para float
-        return pd.to_numeric(col.astype(str).str.replace('R$', '', regex=False).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce')
-
-    for col in df_util.columns:
-        df_util[col] = tratar_numeros(df_util[col])
     
-    df_util = df_util.dropna()
-
-    # 3. Definição do Alvo (Valor Total)
-    # Se o CSV tiver 'Valor Unitário', o código agora ignora-o porque o alvo é 'Valor Total'
-    col_alvo = 'Valor Total'
-    features = [c for c in df_util.columns if c != col_alvo]
-
-    # 4. Regressão
-    X = df_util[features]
-    y = df_util[col_alvo]
-    modelo = LinearRegression().fit(X, y)
-
-    # 5. UI Limpa
-    st.sidebar.header("⚙️ Parâmetros do Imóvel")
-    inputs = {}
-    for col in features:
-        inputs[col] = st.sidebar.number_input(f"{col}", value=float(df_util[col].median()))
-
-    pred = modelo.predict([list(inputs.values())])
-    st.metric("Valor Estimado", f"R$ {pred[0]:,.2f}")
-
-    # 6. Visualização Limpa (Apenas variáveis importantes)
-    st.subheader("📈 Diagnóstico do Modelo")
-    y_pred = modelo.predict(X)
+    st.write("### 1. Colunas Detectadas:", df.columns.tolist())
     
-    fig, ax = plt.subplots(1, 2, figsize=(12, 5))
-    ax[0].scatter(y, y_pred, alpha=0.5, color='darkblue')
-    ax[0].plot([y.min(), y.max()], [y.min(), y.max()], 'r--')
-    ax[0].set_title("Aderência do Modelo")
+    # 2. Conversão manual e transparente
+    # Vamos pegar apenas colunas que parecem ser numéricas
+    df_clean = pd.DataFrame()
+    for col in df.columns:
+        # Tenta converter, vira NaN se não for número
+        clean_col = pd.to_numeric(df[col].astype(str).str.replace('R$', '').str.replace('.', '').str.replace(',', '.'), errors='coerce')
+        
+        # Só incluímos se tivermos dados reais
+        if clean_col.notna().sum() > 0:
+            df_clean[col] = clean_col
+
+    st.write("### 2. Colunas após limpeza numérica:", df_clean.columns.tolist())
+    st.write("### 3. Total de linhas válidas:", len(df_clean.dropna()))
     
-    sns.histplot(y - y_pred, kde=True, ax=ax[1], color='darkgreen')
-    ax[1].set_title("Distribuição dos Erros")
-    st.pyplot(fig)
+    if len(df_clean.dropna()) < 5:
+        st.error("Ainda não restam linhas suficientes. Verifique o mapeamento das colunas abaixo.")
+        st.dataframe(df.head(10)) # Mostra os primeiros dados para você ver a bagunça
+    else:
+        st.success("Dados prontos! O modelo agora pode calcular.")
+        # ... (seu código de regressão aqui)
 
 except Exception as e:
-    st.error(f"Erro no processamento: {e}")
+    st.error(f"Erro: {e}")
