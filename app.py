@@ -10,6 +10,7 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 import io
 import os
+import re
 
 st.set_page_config(page_title="Engenharia de Avaliações", layout="wide")
 
@@ -36,16 +37,16 @@ fonte_dados = st.sidebar.selectbox(
 
 df = None
 
-# Função robusta usando o motor do Pandas com suporte decimal brasileiro nativo
+# Função robusta de leitura de arquivos
 def carregar_csv_com_seguranca(caminho_ou_buffer):
     for enc in ['utf-8', 'latin-1', 'cp1252']:
         for sep in [';', ',']:
             try:
                 if isinstance(caminho_ou_buffer, str):
-                    temp_df = pd.read_csv(caminho_ou_buffer, delimiter=sep, encoding=enc, decimal=',')
+                    temp_df = pd.read_csv(caminho_ou_buffer, delimiter=sep, encoding=enc)
                 else:
                     caminho_ou_buffer.seek(0)
-                    temp_df = pd.read_csv(caminho_ou_buffer, delimiter=sep, encoding=enc, decimal=',')
+                    temp_df = pd.read_csv(caminho_ou_buffer, delimiter=sep, encoding=enc)
                 
                 if len(temp_df.columns) > 1:
                     return temp_df
@@ -93,34 +94,23 @@ if df is not None:
         todas_vars = ['Area_Construida', 'Area_Terreno', 'Quartos', 'Suites', 'Vagas', 'Conservacao', 'Padrao_Acabamento', 'Setor_Urbano', 'Data_Evento', 'Evento']
         variaveis_independentes = [v for v in todas_vars if v in df.columns]
 
-        # Força conversão de dados para float numérico, convertendo erros em nulos (NaN) com segurança
-        df['Preco'] = pd.to_numeric(df['Preco'], errors='coerce')
+        # Função de conversão híbrida e ultra segura para o padrão brasileiro
+        def limpar_para_numero_puro(valor):
+            txt = str(valor).strip().replace('R$', '').replace(' ', '')
+            if not txt or txt.lower() in ['nan', 'null', '']: return np.nan
+            
+            # Trata separadores de milhar e decimal do Excel brasileiro
+            if ',' in txt and '.' in txt:
+                if txt.find('.') < txt.find(','): txt = txt.replace('.', '')
+                else: txt = txt.replace(',', '')
+            if ',' in txt and '.' not in txt:
+                txt = txt.replace(',', '.')
+                
+            txt = re.sub(r'[^\d.]', '', txt)
+            try: return float(txt)
+            except: return np.nan
+
+        # Força aplicação da limpeza em todas as colunas numéricas
+        df['Preco'] = df['Preco'].apply(limpar_para_numero_puro)
         for col in variaveis_independentes:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-            df[col] = df[col].fillna(df[col].median() if not df[col].isnull().all() else 1.0)
-
-        # Remove estritamente se houver linhas vazias nas colunas principais
-        df = df.dropna(subset=['Preco', 'Area_Construida'])
-
-        # Painel de Controle Lateral Dinâmico
-        st.sidebar.header("⚙️ Características do Imóvel")
-        caracteristicas_avaliando = {}
-        
-        if 'Area_Construida' in variaveis_independentes:
-            caracteristicas_avaliando['Area_Construida'] = st.sidebar.number_input("Área Construída (m²)", value=120.0, step=1.0)
-        if 'Area_Terreno' in variaveis_independentes:
-            caracteristicas_avaliando['Area_Terreno'] = st.sidebar.number_input("Área do Terreno (m²)", value=360.0, step=1.0)
-        if 'Quartos' in variaveis_independentes:
-            caracteristicas_avaliando['Quartos'] = st.sidebar.slider("Quantidade de Quartos", 1, 5, 3)
-        if 'Suites' in variaveis_independentes:
-            caracteristicas_avaliando['Suites'] = st.sidebar.slider("Quantidade de Suítes", 0, 5, 1)
-        if 'Vagas' in variaveis_independentes:
-            caracteristicas_avaliando['Vagas'] = st.sidebar.slider("Vagas de Garagem", 0, 5, 2)
-        if 'Conservacao' in variaveis_independentes:
-            caracteristicas_avaliando['Conservacao'] = st.sidebar.selectbox("Estado de Conservação", [1, 2, 3], index=1, format_func=lambda x: {1:"Regular", 2:"Bom", 3:"Excelente"}[x])
-        if 'Padrao_Acabamento' in variaveis_independentes:
-            caracteristicas_avaliando['Padrao_Acabamento'] = st.sidebar.selectbox("Padrão de Acabamento", [1, 2, 3], index=1, format_func=lambda x: {1:"Baixo", 2:"Médio", 3:"Alto"}[x])
-        
-        if 'Setor_Urbano' in variaveis_independentes:
-            valor_inicial = float(df['Setor_Urbano'].median()) if len(df) > 0 else 500.0
-            caracteristicas_avaliando['Setor_Urbano'] = st.sidebar.number_input("
+            df[col] = df[col].apply(lim
