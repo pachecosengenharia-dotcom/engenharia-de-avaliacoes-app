@@ -63,21 +63,27 @@ st.title("📊 AVM - Engenharia de Avaliações")
 # Upload do CSV de base
 arquivo_csv = st.sidebar.file_uploader("Carregar Base de Dados (CSV)", type="csv")
 if arquivo_csv:
+    # 1. Carrega os dados
     df = pd.read_csv(arquivo_csv, sep=";", encoding='latin-1')
+    df.columns = [c.strip() for c in df.columns]
     
-    # [Lógica do Modelo - Simplificada para o exemplo]
+    # 2. DEFINA AS FEATURES E ALVO ANTES DA LIMPEZA
     col_alvo = 'Valor Unitário'
     features = [c for c in df.columns if c != col_alvo]
-    X, y = df[features], df[col_alvo]
-    modelo = LinearRegression().fit(X, y)
-    eq_str = " + ".join([f"{c:.2f}*{n}" for n, c in zip(features, modelo.coef_)])
-
-    # Entrada de Dados
-    st.sidebar.subheader("📍 Entrada do Imóvel")
-    tipo_input = st.sidebar.radio("Fonte de Dados:", ["Manual", "Via PDF"])
     
-    dados_imovel = {n: 0.0 for n in features}
-    endereco = st.sidebar.text_input("Endereço do Imóvel:")
+    # 3. AGORA A LIMPEZA (df_clean está aqui dentro)
+    df_clean = df.copy()
+    for col in features:
+        df_clean[col] = pd.to_numeric(df_clean[col].astype(str).str.replace(',', '.'), errors='coerce')
+    
+    df_clean = df_clean.dropna(subset=features + [col_alvo])
+    
+    # 4. MODELAGEM
+    X = df_clean[features]
+    y = df_clean[col_alvo]
+    modelo = LinearRegression().fit(X, y)
+    
+    # ... resto do seu código ...
 
     if tipo_input == "Via PDF":
         doc = st.sidebar.file_uploader("Subir Laudo/Escritura", type="pdf")
