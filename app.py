@@ -2,81 +2,63 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
+import io
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
+# --- Configuração da Página ---
 st.set_page_config(layout="wide")
 st.title("📊 AVM - Engenharia de Avaliações")
 
-# Carrega o arquivo
+# --- Lógica Principal ---
 arquivo_csv = st.sidebar.file_uploader("Carregar Base de Dados (CSV)", type="csv")
 
 if arquivo_csv is not None:
-    # 1. Leitura do arquivo
+    # 1. Leitura
     df = pd.read_csv(arquivo_csv, sep=";", encoding='latin-1')
     
-    # 2. Definição explícita das colunas que são números
-    # Estas são as colunas que estão exatamente no seu CSV
-    # 2. Definição explícita das colunas que são números
-  # 2. Definição explícita das colunas que são números
+    # 2. Definição das colunas numéricas (sem 'Valor Total')
     cols_numericas = [
         'Área Privativa', 'Área do Terreno', 'Quartos', 'Evento', 
         'Padrão de Acabamento', 'Suite', 'Estado de Conservação', 
         'Idade Aparente', 'Setor urbano', 'Data do Evento'
-        # 'Valor Total' foi removido propositalmente daqui
     ]
     col_alvo = 'Valor Unitário'
     
-    # ... (seu código de limpeza e conversão segue o mesmo) ...
-
-    # 4. Ajuste do Modelo
-    # Aqui garantimos que apenas as colunas da lista acima entrem no X
-    features = [c for c in cols_numericas if c in df_clean.columns]
-    
-    X = df_clean[features]
-    y = df_clean[col_alvo]
-    
-    modelo = LinearRegression().fit(X, y)
-    
-    st.success(f"Modelo treinado! Variáveis utilizadas: {features}")
-    
-    # 3. Limpeza rigorosa: converte tudo para float, tratando vírgula decimal
+    # 3. Limpeza dos dados
     df_clean = pd.DataFrame()
-    for col in cols_numericas:
-        if col in df.columns:
-            # Substitui vírgula por ponto e converte para float
-            df_clean[col] = df[col].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False).astype(float)
     
-    # Remove linhas vazias
+    # Função auxiliar para limpar números brasileiros (vírgula decimal)
+    def clean_num(col):
+        return pd.to_numeric(col.astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce')
+
+    for col in cols_numericas + [col_alvo]:
+        if col in df.columns:
+            df_clean[col] = clean_num(df[col])
+    
     df_clean = df_clean.dropna()
 
-    # 4. Verificação se temos dados para treinar
+    # 4. Treinamento
     if not df_clean.empty:
-        col_alvo = 'Valor Unitário'
-        features = [c for c in df_clean.columns if c != col_alvo]
-        
-        X = df_clean[features]
+        X = df_clean[cols_numericas]
         y = df_clean[col_alvo]
         
-        # Treinamento
         modelo = LinearRegression().fit(X, y)
-        
         st.success("Modelo treinado com sucesso!")
-        st.write("Variáveis utilizadas:", features)
         
-        # Exibição de coeficientes
-        st.write("Impacto das variáveis (Coeficientes):")
-        st.bar_chart(pd.Series(modelo.coef_, index=features))
+        # Exibir Coeficientes
+        st.write("### Impacto das Variáveis (Coeficientes):")
+        coefs = pd.Series(modelo.coef_, index=cols_numericas)
+        st.bar_chart(coefs)
         
-        # Input para predição
-        st.sidebar.header("⚙️ Parâmetros para Avaliação")
-        inputs = {}
-        for f in features:
-            inputs[f] = st.sidebar.number_input(f, value=float(df_clean[f].median()))
-            
-        if st.sidebar.button("Calcular V.U."):
-            input_array = np.array([inputs[f] for f in features]).reshape(1, -1)
-            pred = modelo.predict(input_array)[0]
+        # Predição
+        st.sidebar.header("⚙️ Parâmetros do Imóvel")
+        inputs = {f: st.sidebar.number_input(f, value=float(df_clean[f].median())) for f in cols_numericas}
+        
+        if st.sidebar.button("Calcular"):
+            pred = modelo.predict(np.array([list(inputs.values())]))[0]
             st.metric("V.U. Estimado", f"R$ {pred:,.2f}")
     else:
-        st.error("Erro: Não foi possível processar os dados. Verifique se o CSV contém números válidos.")
+        st.error("Erro: Dados insuficientes. Verifique se o separador e os nomes das colunas estão corretos.")
 else:
-    st.info("Por favor, carregue o arquivo CSV para ver os gráficos e resultados.")
+    st.info("Por favor, carregue o arquivo CSV para iniciar.")
