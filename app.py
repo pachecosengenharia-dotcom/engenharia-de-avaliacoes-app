@@ -42,70 +42,50 @@ def gerar_laudo_pdf(endereco, valor_medio, eq_str):
 arquivo_csv = st.sidebar.file_uploader("Carregar Base de Dados (CSV)", type="csv")
 
 # --- Lógica de Modelagem Corrigida ---
-# --- MODELAGEM ROBUSTA (SUBSTITUA TODO O BLOCO NO SEU APP) ---
+# --- MODELAGEM ROBUSTA (CÓDIGO AJUSTADO PARA O SEU CSV) ---
 if arquivo_csv is not None:
-    # 1. Leitura inicial
+    # 1. Leitura do arquivo
     df = pd.read_csv(arquivo_csv, sep=";", encoding='latin-1')
-
-    # 2. SELEÇÃO EXPLÍCITA DAS COLUNAS NUMÉRICAS
-    # Identificamos os nomes das colunas conforme o seu CSV
-    cols_para_treino = [
+    
+    # 2. Definição das colunas numéricas (conforme o seu arquivo)
+    cols_numericas = [
         'Área Privativa', 'Área do Terreno', 'Quartos', 'Evento', 
         'Padrão de Acabamento', 'Suite', 'Estado de Conservação', 
         'Idade Aparente', 'Setor urbano', 'Data do Evento', 'Valor Total'
     ]
     col_alvo = 'Valor Unitário'
-
-    # Criamos um novo DataFrame apenas com o que é número
-    df_clean = pd.DataFrame()
-
-    # Função para limpar vírgulas e converter para float
-    def converter_limpo(coluna):
-        return pd.to_numeric(coluna.astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
-
-    # Processamos cada coluna necessária
-    for col in cols_para_treino + [col_alvo]:
-        if col in df.columns:
-            df_clean[col] = converter_limpo(df[col])
     
-    # 3. Limpeza final: remover linhas com dados faltantes (NaN)
+    # 3. Função para limpar e converter números
+    def converter_limpo(valor):
+        # Transforma "2.150,53" em 2150.53 (trata vírgula e ponto)
+        s = str(valor).replace('.', '').replace(',', '.')
+        try:
+            return float(s)
+        except:
+            return np.nan
+
+    # 4. Criamos um novo DataFrame apenas com os dados limpos
+    df_clean = pd.DataFrame()
+    for col in cols_numericas + [col_alvo]:
+        if col in df.columns:
+            df_clean[col] = df[col].apply(converter_limpo)
+    
+    # Removemos linhas que ficaram com algum erro (NaN)
     df_clean = df_clean.dropna()
 
-    # 4. Ajuste do modelo
+    # 5. Treinamento do Modelo
     if not df_clean.empty:
-        X = df_clean[cols_para_treino]
+        X = df_clean[cols_numericas]
         y = df_clean[col_alvo]
         modelo = LinearRegression().fit(X, y)
+        
         st.success("Modelo treinado com sucesso!")
         
-        # Opcional: mostrar coeficientes para análise técnica
-        st.write("Coeficientes do Modelo (Impacto nas variáveis):")
-        st.write(pd.Series(modelo.coef_, index=cols_para_treino))
+        # Exibir importância das variáveis
+        st.write("Coeficientes (Impacto de cada variável):")
+        st.bar_chart(pd.Series(modelo.coef_, index=cols_numericas))
     else:
-        st.error("Erro: O conjunto de dados resultou vazio. Verifique se as colunas estão preenchidas.")
-    
-    if X.empty or y.empty:
-        st.error("Erro: Dados insuficientes ou inválidos após a limpeza.")
-    else:
-        modelo = LinearRegression().fit(X, y)
-        st.success("Modelo treinado com sucesso!")
-        
-        # ... resto do seu código (inputs, cálculo, download) ...
-    
-    if tipo_input == "Via PDF":
-        doc = st.sidebar.file_uploader("Subir Laudo", type="pdf")
-        if doc:
-            texto = pdfplumber.open(doc).pages[0].extract_text()
-            extraidos = extrair_atributos_do_texto(texto)
-            valido, msg = validar_dados_imovel(extraidos)
-            if valido:
-                for k, v in extraidos.items(): dados_imovel[k] = v
-                st.sidebar.success("Dados validados!")
-            else:
-                st.sidebar.error(msg)
-    else:
-        for f in features:
-            dados_imovel[f] = st.sidebar.number_input(f"{f}", value=float(df_clean[f].median()))
+        st.error("Erro: Nenhum dado numérico válido foi encontrado. Verifique se o nome das colunas está correto.")
             
     # Cálculo e Exportação
     if st.button("Calcular Avaliação"):
