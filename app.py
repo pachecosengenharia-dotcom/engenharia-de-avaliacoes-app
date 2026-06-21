@@ -3,57 +3,67 @@ import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
-import statsmodels.api as sm
+import io
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
 st.set_page_config(layout="wide")
-st.title("📊 Engenharia de Avaliações - Diagnóstico Técnico")
+st.title("📊 Engenharia de Avaliações - Goiânia")
 
+# Bloco protegido para garantir que nada quebre
 try:
-    # 1. Leitura e Limpeza (manter a lógica anterior)
+    # 1. Leitura
     df = pd.read_csv("Goiânia - GO.csv", sep=";", encoding='latin-1')
     df.columns = [c.strip() for c in df.columns]
-    
-    # [Lógica de limpeza conforme usado anteriormente...]
-    # ... (garantindo df_modelo com colunas numéricas)
 
-    # 2. Regressão e Diagnóstico com Statsmodels (mais completo)
-    X = df_modelo.drop(columns=[col_alvo])
-    y = df_modelo[col_alvo]
-    X_sm = sm.add_constant(X)
-    modelo_sm = sm.OLS(y, X_sm).fit()
+    # 2. Definição das colunas esperadas
+    col_alvo = 'Valor Unitário'
+    features = ['Área Construída', 'Área do Terreno', 'Evento', 'Padrão de Acabamento', 
+                'Estado de Conservação', 'Setor urbano', 'Data do Evento', 'Quartos', 'Suítes']
+    
+    # 3. Limpeza (Converte tudo para número, ignora textos)
+    df_modelo = pd.DataFrame()
+    if col_alvo in df.columns:
+        df_modelo[col_alvo] = pd.to_numeric(df[col_alvo].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
+    
+    for col in features:
+        if col in df.columns:
+            df_modelo[col] = pd.to_numeric(df[col].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
+    
+    df_modelo = df_modelo.dropna()
 
-    # 3. Equação
-    st.subheader("Equação do Modelo")
-    equacao = f"V.U. = {modelo_sm.params[0]:.2f} "
-    for i, col in enumerate(X.columns):
-        equacao += f"+ ({modelo_sm.params[i+1]:.2f} * {col}) "
-    st.latex(equacao)
-
-    # 4. Gráficos de Diagnóstico
-    st.subheader("Diagnóstico de Resíduos e Influência")
-    fig, ax = plt.subplots(1, 3, figsize=(18, 5))
-    
-    # Aderência (Observado vs Previsto)
-    ax[0].scatter(y, modelo_sm.fittedvalues, alpha=0.5)
-    ax[0].plot([y.min(), y.max()], [y.min(), y.max()], 'r--')
-    ax[0].set_title("Aderência (Obs vs Prev)")
-    
-    # Resíduos
-    ax[1].scatter(modelo_sm.fittedvalues, modelo_sm.resid, alpha=0.5, color='orange')
-    ax[1].axhline(0, color='black', linestyle='--')
-    ax[1].set_title("Resíduos")
-    
-    # Distância de Cook
-    influence = modelo_sm.get_influence()
-    cooks_d = influence.cooks_distance[0]
-    ax[2].stem(cooks_d)
-    ax[2].set_title("Distância de Cook (Outliers)")
-    
-    st.pyplot(fig)
-    
-    # 5. Valor Total e Unidade
-    # Cálculo final para o imóvel inserido
-    # ...
+    # 4. Cálculo do Modelo (Só se houver dados!)
+    if not df_modelo.empty:
+        X = df_modelo.drop(columns=[col_alvo])
+        y = df_modelo[col_alvo]
+        modelo = LinearRegression().fit(X, y)
+        
+        # Equação
+        intercept = modelo.intercept_
+        coefs = dict(zip(X.columns, modelo.coef_))
+        
+        # Interface
+        st.sidebar.header("⚙️ Parâmetros do Imóvel")
+        inputs = [st.sidebar.number_input(f"{col}", value=float(df_modelo[col].median())) for col in X.columns]
+        
+        # Predições
+        pred_unit = modelo.predict([inputs])[0]
+        minimo = pred_unit * 0.9  # Estimativa de intervalo (simplificada)
+        maximo = pred_unit * 1.1
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Valor Unitário (Mín)", f"R$ {minimo:,.2f}")
+        col2.metric("Valor Unitário (Médio)", f"R$ {pred_unit:,.2f}")
+        col3.metric("Valor Unitário (Máx)", f"R$ {maximo:,.2f}")
+        
+        # Gráfico
+        st.subheader("Análise de Aderência")
+        fig, ax = plt.subplots()
+        ax.scatter(y, modelo.predict(X), alpha=0.5)
+        st.pyplot(fig)
+        
+    else:
+        st.error("Dados insuficientes. Verifique os nomes das colunas no CSV.")
 
 except Exception as e:
-    st.error(f"Erro: {e}")
+    st.error(f"Erro técnico: {e}")
