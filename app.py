@@ -67,11 +67,30 @@ if arquivo_csv is not None:
     df_clean = df_clean.dropna(subset=[col_alvo])
     
     # 4. Modelagem
-    features = [c for c in df_clean.columns if c != col_alvo]
-    X = df_clean[features].fillna(0) # Preenche o que sobrou com 0
-    y = df_clean[col_alvo]
+    # 3. Modelagem Robusta (Substitua por este bloco)
+    col_alvo = 'Valor Unitário'
     
-    # ... resto do código (modelo = LinearRegression().fit(X, y)...)
+    # 1. Converter tudo para numérico, forçando erro para o que não for número (vira NaN)
+    df_numerico = df.apply(pd.to_numeric, errors='coerce')
+    
+    # 2. Adicionar o Valor Unitário de volta (pois ele tem vírgulas e foi convertido acima)
+    df[col_alvo] = df[col_alvo].astype(str).str.replace(',', '.').astype(float)
+    df_numerico[col_alvo] = df[col_alvo]
+    
+    # 3. Remover colunas que ficaram vazias (que eram texto puro)
+    df_final = df_numerico.dropna(axis=1, how='all')
+    
+    # 4. Remover linhas vazias
+    df_final = df_final.dropna()
+    
+    # 5. Definir X e Y
+    features = [c for c in df_final.columns if c != col_alvo]
+    X = df_final[features]
+    y = df_final[col_alvo]
+    
+    # 6. Fit
+    modelo = LinearRegression().fit(X, y)
+    st.success(f"Modelo treinado com sucesso com as variáveis: {features}")
     
     if X.empty or y.empty:
         st.error("Erro: Dados insuficientes ou inválidos após a limpeza.")
