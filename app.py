@@ -42,41 +42,36 @@ def gerar_laudo_pdf(endereco, valor_medio, eq_str):
 arquivo_csv = st.sidebar.file_uploader("Carregar Base de Dados (CSV)", type="csv")
 
 # --- Lógica de Modelagem Corrigida ---
+# --- Carregamento e Limpeza Robusta ---
 if arquivo_csv is not None:
-    # 1. Leitura
+    # 1. Leitura forçada
     df = pd.read_csv(arquivo_csv, sep=";", encoding='latin-1')
     
-    # 2. Definição do alvo e limpeza
-    # O CSV está usando vírgula como decimal. Precisamos converter para ponto.
-    col_alvo = 'Valor Unitário'
+    # 2. Identificação dinâmica do alvo (buscando pelo que termina com 'Unitário')
+    col_alvo = [c for c in df.columns if 'Unit' in c][0]
     
-    # Selecionamos apenas as colunas que são numéricas para o modelo
-    # Removemos colunas de texto (Endereço, Bairro, etc)
+    # 3. Limpeza rigorosa
     df_clean = df.copy()
     
-    # Função para limpar colunas numéricas que estão como texto (troca vírgula por ponto)
-    def limpar_coluna(col):
-        if col.dtype == 'object':
-            return pd.to_numeric(col.astype(str).str.replace(',', '.'), errors='coerce')
-        return col
-
-    # Aplica a limpeza em todas as colunas
+    # Converte tudo para numérico, tratando a vírgula como ponto
     for col in df_clean.columns:
-        df_clean[col] = limpar_coluna(df_clean[col])
-        
-    # Remove colunas que não são úteis para o modelo (texto puro)
-    # Lista de colunas que devem ser removidas do treinamento
-    cols_drop = ['Endereço', 'Complemento', 'Bairro', 'Informante', 'Telefone', 'Evento']
-    # Ajuste o nome das colunas conforme necessário (considerando o encoding)
-    df_clean = df_clean.drop(columns=[c for c in cols_drop if c in df_clean.columns], errors='ignore')
+        if df_clean[col].dtype == 'object':
+            # Remove pontos de milhar, troca vírgula por ponto
+            df_clean[col] = df_clean[col].astype(str).str.replace('.', '').str.replace(',', '.')
+            df_clean[col] = pd.to_numeric(df_clean[col], errors='coerce')
     
-    # Remove linhas com valores vazios (NaN)
-    df_clean = df_clean.dropna()
+    # Remove colunas que ficaram com tudo NaN (como texto puro que não virou número)
+    df_clean = df_clean.dropna(axis=1, how='all')
     
-    # 3. Modelagem
+    # Remove linhas com valores vazios na coluna alvo
+    df_clean = df_clean.dropna(subset=[col_alvo])
+    
+    # 4. Modelagem
     features = [c for c in df_clean.columns if c != col_alvo]
-    X = df_clean[features]
+    X = df_clean[features].fillna(0) # Preenche o que sobrou com 0
     y = df_clean[col_alvo]
+    
+    # ... resto do código (modelo = LinearRegression().fit(X, y)...)
     
     if X.empty or y.empty:
         st.error("Erro: Dados insuficientes ou inválidos após a limpeza.")
