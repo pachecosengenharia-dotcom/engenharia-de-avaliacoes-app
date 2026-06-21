@@ -44,45 +44,38 @@ arquivo_csv = st.sidebar.file_uploader("Carregar Base de Dados (CSV)", type="csv
 # --- Lógica de Modelagem Corrigida ---
 # --- MODELAGEM ROBUSTA (CÓDIGO AJUSTADO PARA O SEU CSV) ---
 if arquivo_csv is not None:
-    # 1. Leitura do arquivo
+    # 1. Leitura do arquivo (encoding latin-1 é essencial para acentos)
     df = pd.read_csv(arquivo_csv, sep=";", encoding='latin-1')
     
-    # 2. Definição das colunas numéricas (conforme o seu arquivo)
+    # 2. Definição das colunas que são números
     cols_numericas = [
         'Área Privativa', 'Área do Terreno', 'Quartos', 'Evento', 
         'Padrão de Acabamento', 'Suite', 'Estado de Conservação', 
-        'Idade Aparente', 'Setor urbano', 'Data do Evento', 'Valor Total'
+        'Idade Aparente', 'Setor urbano', 'Data do Evento', 'Valor Total', 'Valor Unitário'
     ]
-    col_alvo = 'Valor Unitário'
     
-    # 3. Função para limpar e converter números
-    def converter_limpo(valor):
-        # Transforma "2.150,53" em 2150.53 (trata vírgula e ponto)
-        s = str(valor).replace('.', '').replace(',', '.')
-        try:
-            return float(s)
-        except:
-            return np.nan
-
-    # 4. Criamos um novo DataFrame apenas com os dados limpos
+    # 3. Limpeza rigorosa: isola apenas colunas numéricas e corrige a vírgula
     df_clean = pd.DataFrame()
-    for col in cols_numericas + [col_alvo]:
+    for col in cols_numericas:
         if col in df.columns:
-            df_clean[col] = df[col].apply(converter_limpo)
+            # Converte para string, troca vírgula por ponto e converte para float
+            df_clean[col] = df[col].astype(str).str.replace('.', '').str.replace(',', '.').astype(float)
     
-    # Removemos linhas que ficaram com algum erro (NaN)
+    # Remove qualquer linha vazia
     df_clean = df_clean.dropna()
 
-    # 5. Treinamento do Modelo
-    if not df_clean.empty:
-        X = df_clean[cols_numericas]
-        y = df_clean[col_alvo]
-        modelo = LinearRegression().fit(X, y)
-        
-        st.success("Modelo treinado com sucesso!")
-        
-        # Exibir importância das variáveis
-        st.write("Coeficientes (Impacto de cada variável):")
+    # 4. Treinamento do Modelo
+    col_alvo = 'Valor Unitário'
+    features = [c for c in df_clean.columns if c != col_alvo]
+    
+    X = df_clean[features]
+    y = df_clean[col_alvo]
+    
+    modelo = LinearRegression().fit(X, y)
+    st.success("Modelo treinado com sucesso!")
+    
+    # Exibir resultados na interface
+    st.write("Coeficientes do modelo:", pd.Series(modelo.coef_, index=features))
         st.bar_chart(pd.Series(modelo.coef_, index=cols_numericas))
     else:
         st.error("Erro: Nenhum dado numérico válido foi encontrado. Verifique se o nome das colunas está correto.")
