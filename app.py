@@ -3,55 +3,51 @@ import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
-import io
 
-# Configuração Base
-st.set_page_config(page_title="Engenharia de Avaliações", layout="wide")
 st.title("📊 Engenharia de Avaliações - Goiânia")
 
-# Carregar arquivo (usando o seu CSV de Goiânia)
+# 1. Carregamento Robusto
 try:
+    # Lendo o arquivo diretamente
     df = pd.read_csv("Goiânia - GO.csv", sep=";")
-    # Limpeza básica de nomes de colunas
+    
+    # Debug: Mostrar colunas encontradas para verificarmos o erro
+    st.write("Colunas detectadas:", df.columns.tolist())
+    
+    # Limpeza de nomes
     df.columns = [c.strip() for c in df.columns]
     
-    # Seleção de colunas para o modelo
-    # Área Privativa, Quartos, Suítes, Valor Total
+    # Mapeamento dinâmico (ajuste conforme o print das colunas que aparecer na tela)
+    # Se o nome no CSV for 'Área Privativa', ele usará esse nome.
     features = ['Área Privativa', 'Quartos', 'Suite']
     target = 'Valor Total'
     
-    # Limpeza de dados (remover sujeira de texto)
-    for col in features + [target]:
-        if df[col].dtype == 'object':
-            df[col] = df[col].astype(str).str.replace(',', '.').astype(float)
-            
-    df = df.dropna()
-
-    # Treino do Modelo (Puro)
-    X = df[features]
-    y = df[target]
-    
-    modelo = LinearRegression()
-    modelo.fit(X, y)
-    
-    # Inputs do usuário
-    st.sidebar.header("Dados do Imóvel")
-    area = st.sidebar.number_input("Área Privativa (m²)", value=float(df['Área Privativa'].mean()))
-    quartos = st.sidebar.slider("Quartos", 1, 5, 3)
-    suites = st.sidebar.slider("Suítes", 0, 5, 1)
-    
-    # Predição
-    pred = modelo.predict([[area, quartos, suites]])
-    
-    st.metric("Valor de Mercado Estimado", f"R$ {pred[0]:,.2f}")
-    
-    # Gráfico simples
-    fig, ax = plt.subplots()
-    ax.scatter(df['Área Privativa'], df[target], color='blue', alpha=0.5)
-    ax.set_xlabel("Área")
-    ax.set_ylabel("Valor")
-    st.pyplot(fig)
+    # Validação de existência de colunas
+    if all(col in df.columns for col in features + [target]):
+        
+        # Limpeza de dados (conversão de moeda/texto para float)
+        for col in features + [target]:
+            if df[col].dtype == 'object':
+                df[col] = df[col].astype(str).str.replace(',', '.').astype(float)
+        
+        df = df.dropna()
+        
+        # Treino
+        X = df[features]
+        y = df[target]
+        modelo = LinearRegression().fit(X, y)
+        
+        # Interface
+        st.sidebar.header("Dados do Imóvel")
+        area = st.sidebar.number_input("Área Privativa", value=float(df['Área Privativa'].mean()))
+        quartos = st.sidebar.slider("Quartos", 1, 5, 2)
+        suites = st.sidebar.slider("Suítes", 0, 5, 1)
+        
+        pred = modelo.predict([[area, quartos, suites]])
+        st.metric("Valor de Mercado Estimado", f"R$ {pred[0]:,.2f}")
+        
+    else:
+        st.error("As colunas não coincidem com o esperado. Verifique o nome das colunas no CSV.")
 
 except Exception as e:
-    st.error(f"Erro ao processar: {e}")
-    st.info("Verifique se o arquivo 'Goiânia - GO.csv' está na mesma pasta do app.py")
+    st.error(f"Erro crítico: {e}")
