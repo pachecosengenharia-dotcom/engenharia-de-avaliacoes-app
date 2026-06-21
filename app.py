@@ -5,20 +5,27 @@ from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
 import os
 import io
-
-# Tenta importar o reportlab, se falhar, avisa no app em vez de dar tela branca
-try:
-    from reportlab.lib.pagesizes import A4
-    from reportlab.pdfgen import canvas
-    has_pdf = True
-except ImportError:
-    has_pdf = False
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
 st.set_page_config(layout="wide")
-st.title("📊 Engenharia de Avaliações - Laudo Técnico")
+st.title("📊 Engenharia de Avaliações - Laudo Técnico Completo")
 
 arquivos = [f for f in os.listdir('.') if f.endswith('.csv')]
 regiao = st.sidebar.selectbox("Selecione a Região:", arquivos)
+
+def gerar_pdf(pred_unit, pred_total, minimo, maximo, eq_str):
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(50, 800, "Laudo Técnico de Avaliação Imobiliária")
+    c.setFont("Helvetica", 12)
+    c.drawString(50, 770, f"Equação: {eq_str}")
+    c.drawString(50, 740, f"V.U. Mínimo: R$ {minimo:,.2f} | Médio: R$ {pred_unit:,.2f} | Máximo: R$ {maximo:,.2f}")
+    c.drawString(50, 710, f"Valor Total Estimado: R$ {pred_total:,.2f}")
+    c.save()
+    buffer.seek(0)
+    return buffer
 
 if regiao:
     try:
@@ -26,9 +33,8 @@ if regiao:
         df.columns = [c.strip() for c in df.columns]
 
         col_alvo = 'Valor Unitário'
-        # Seleção dinâmica de colunas
         features = [c for c in df.columns if c != col_alvo and pd.to_numeric(df[c].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce').notna().sum() > len(df)*0.5]
-        
+
         df_modelo = df[features + [col_alvo]].apply(lambda x: pd.to_numeric(x.astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce'))
         df_modelo = df_modelo.dropna()
 
@@ -37,18 +43,43 @@ if regiao:
             y = df_modelo[col_alvo]
             modelo = LinearRegression().fit(X, y)
             
-            # Interface
-            st.sidebar.header("⚙️ Parâmetros")
+            # Equação
+            intercept = modelo.intercept_
+            eq_str = f"V.U. = {intercept:.2f} " + " ".join([f"+ ({c:.2f} * {n})" for n, c in zip(features, modelo.coef_)])
+            st.subheader("Equação do Modelo")
+            st.latex(eq_str)
+
+            # Cálculos
+            st.sidebar.header("⚙️ Parâmetros do Imóvel")
             inputs = [st.sidebar.number_input(f"{n}", value=float(df_modelo[n].median())) for n in features]
             pred_unit = modelo.predict([inputs])[0]
+            residuos = y - modelo.predict(X)
+            erro_padrao = np.std(residuos)
+            minimo, maximo = pred_unit - (1.96 * erro_padrao), pred_unit + (1.96 * erro_padrao)
+            area = inputs[features.index(next((c for c in features if 'área' in c.lower()), features[0]))]
             
-            st.metric("Valor Unitário Estimado", f"R$ {pred_unit:,.2f} / m²")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("V.U. Mínimo", f"R$ {minimo:,.2f}")
+            col2.metric("V.U. Médio", f"R$ {pred_unit:,.2f}")
+            col3.metric("V.U. Máximo", f"R$ {maximo:,.2f}")
+            st.metric("Valor Total (Médio)", f"R$ {pred_unit * area:,.2f}")
+
+            # Diagnóstico estatístico
+            n, p = len(y), len(features) + 1
+            X_mat = np.column_stack([np.ones(n), X])
+            leverage = np.diag(X_mat @ np.linalg.inv(X_mat.T @ X_mat) @ X_mat.T)
+            cooks_dist = (residuos**2 / (p * np.var(residuos))) * (leverage / (1 - leverage)**2)
             
-            if has_pdf:
-                st.success("PDF pronto para gerar.")
-            else:
-                st.warning("Biblioteca 'reportlab' não encontrada. Verifique o requirements.txt.")
+            fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
+            ax1.scatter(y, modelo.predict(X), alpha=0.5); ax1.set_title("Aderência (Obs vs Prev)")
+            ax2.scatter(modelo.predict(X), residuos, alpha=0.5, color='orange'); ax2.axhline(0, color='black', linestyle='--'); ax2.set_title("Resíduos")
+            ax3.stem(cooks_dist); ax3.set_title("Distância de Cook (Influência)")
+            st.pyplot(fig)
+
+            # PDF
+            pdf_data = gerar_pdf(pred_unit, pred_unit * area, minimo, maximo, eq_str)
+            st.download_button("📥 Baixar Laudo Completo em PDF", data=pdf_data, file_name="laudo_avaliacao.pdf", mime="application/pdf")
         else:
             st.error("Dados insuficientes.")
     except Exception as e:
-        st.error(f"Erro ao processar: {e}")
+        st.error(f"Erro: {e}")
