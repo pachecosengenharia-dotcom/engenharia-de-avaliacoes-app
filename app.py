@@ -3,10 +3,27 @@ import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
+import io
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
-# --- Configuração ---
 st.set_page_config(layout="wide")
 st.title("📊 AVM - Engenharia de Avaliações (NBR 14653)")
+
+# --- FUNÇÃO DE GERAÇÃO DE PDF ---
+def gerar_laudo_pdf(dados):
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(50, 800, "Laudo Técnico de Avaliação Imobiliária")
+    c.setFont("Helvetica", 12)
+    c.drawString(50, 770, f"Equação: {dados['eq']}")
+    c.drawString(50, 750, f"V.U. Médio Estimado: R$ {dados['vu_medio']:,.2f}")
+    c.drawString(50, 730, f"Campo de Arbítrio: R$ {dados['min']:,.2f} a R$ {dados['max']:,.2f}")
+    c.drawString(50, 710, f"Valor Total: R$ {dados['total']:,.2f}")
+    c.save()
+    buffer.seek(0)
+    return buffer
 
 arquivo_csv = st.sidebar.file_uploader("Carregar Base de Dados (CSV)", type="csv")
 
@@ -17,7 +34,6 @@ if arquivo_csv is not None:
                      'Idade Aparente', 'Setor urbano', 'Data do Evento']
     col_alvo = 'Valor Unitário'
     
-    # Limpeza
     df_clean = pd.DataFrame()
     for col in features_list + [col_alvo]:
         if col in df.columns:
@@ -25,56 +41,29 @@ if arquivo_csv is not None:
     df_clean = df_clean.dropna()
 
     if not df_clean.empty:
-        X = df_clean[features_list]
-        y = df_clean[col_alvo]
-        modelo = LinearRegression().fit(X, y)
-        
-        # 1. Equação
+        modelo = LinearRegression().fit(df_clean[features_list], df_clean[col_alvo])
         eq_str = f"V.U. = {modelo.intercept_:.2f} " + " ".join([f"+ ({c:.2f}*{n})" for n, c in zip(features_list, modelo.coef_)])
-        st.subheader("Equação do Modelo")
         st.latex(eq_str)
         
-        # 2. Diagnóstico Visual
-        predicoes = modelo.predict(X)
-        residuos = y - predicoes
-        n, p = len(y), len(features_list) + 1
-        X_mat = np.column_stack([np.ones(n), X])
-        leverage = np.diag(X_mat @ np.linalg.inv(X_mat.T @ X_mat) @ X_mat.T)
-        cooks_dist = (residuos**2 / (p * np.var(residuos))) * (leverage / (1 - leverage)**2)
+        # Inputs e Validação
+        st.sidebar.header("⚙️ Parâmetros")
+        inputs = {f: st.sidebar.number_input(f, value=float(df_clean[f].median())) for f in features_list}
         
-        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
-        ax1.scatter(y, predicoes, alpha=0.5); ax1.set_title("Aderência (Obs vs Prev)")
-        ax2.scatter(predicoes, residuos, alpha=0.5, color='orange'); ax2.axhline(0, color='black', linestyle='--'); ax2.set_title("Resíduos")
-        ax3.stem(cooks_dist); ax3.set_title("Distância de Cook")
-        st.pyplot(fig)
-        
-        # 3. Inputs com Validação NBR
-        st.sidebar.header("⚙️ Parâmetros do Imóvel")
-        inputs = {}
-        extrapolou = False
-        for f in features_list:
-            min_val, max_val = df_clean[f].min(), df_clean[f].max()
-            val = st.sidebar.number_input(f"{f} (Limites: {min_val:.1f} a {max_val:.1f})", value=float(df_clean[f].median()))
-            inputs[f] = val
-            if val < min_val or val > max_val:
-                st.sidebar.warning(f"⚠️ Extrapolação em {f}!")
-                extrapolou = True
-        
-        # 4. Cálculo e Resultados
-        if st.sidebar.button("Calcular Precificação"):
-            if extrapolou:
-                st.error("Erro: Parâmetros fora dos limites amostrais da NBR 14653.")
-            else:
-                pred_unit = modelo.predict(np.array([list(inputs.values())]))[0]
-                erro_padrao = np.std(residuos)
-                area = inputs.get('Área Privativa', 1)
-                
-                col1, col2, col3 = st.columns(3)
-                col1.metric("V.U. Mínimo", f"R$ {pred_unit - (1.96 * erro_padrao):,.2f}")
-                col2.metric("V.U. Médio", f"R$ {pred_unit:,.2f}")
-                col3.metric("V.U. Máximo", f"R$ {pred_unit + (1.96 * erro_padrao):,.2f}")
-                
-                st.write(f"### Valor Total Estimado: R$ {pred_unit * area:,.2f}")
-                st.write(f"Intervalo Total: R$ {(pred_unit - (1.96 * erro_padrao))*area:,.2f} a R$ {(pred_unit + (1.96 * erro_padrao))*area:,.2f}")
-    else:
-        st.error("Dados insuficientes.")
+        if st.sidebar.button("Calcular e Gerar Laudo"):
+            pred_unit = modelo.predict(np.array([list(inputs.values())]))[0]
+            residuos = df_clean[col_alvo] - modelo.predict(df_clean[features_list])
+            erro_padrao = np.std(residuos)
+            
+            # Preparar dados para o PDF
+            dados_pdf = {
+                'eq': eq_str, 'vu_medio': pred_unit,
+                'min': pred_unit - (1.96 * erro_padrao),
+                'max': pred_unit + (1.96 * erro_padrao),
+                'total': pred_unit * inputs.get('Área Privativa', 1)
+            }
+            
+            # Exibir resultados na tela
+            st.metric("V.U. Médio", f"R$ {dados_pdf['vu_medio']:,.2f}")
+            st.download_button("📥 Baixar Laudo Completo (PDF)", 
+                               data=gerar_laudo_pdf(dados_pdf), 
+                               file_name="laudo_avaliacao.pdf", mime="application/pdf")
