@@ -20,18 +20,18 @@ def gerar_laudo_pdf(d, fig, eq_str, inputs):
     c = canvas.Canvas(buffer, pagesize=A4)
     c.setFont("Helvetica-Bold", 14)
     c.drawString(50, 820, "Laudo Tecnico Completo (NBR 14653)")
-    
     c.setFont("Helvetica", 10)
-    # Equação com quebra de linha manual
+    
+    # Equação
     c.drawString(50, 790, "Equacao do Modelo:")
     y = 775
     for i in range(0, len(eq_str), 80):
         c.drawString(50, y, eq_str[i:i+80])
         y -= 15
     
-    # Variáveis e seus valores
+    # Variáveis
     y -= 10
-    c.drawString(50, y, "Variaveis utilizadas no modelo:")
+    c.drawString(50, y, "Variaveis utilizadas:")
     y -= 15
     for k, v in inputs.items():
         c.drawString(60, y, f"- {k.capitalize()}: {v:.2f}")
@@ -43,23 +43,25 @@ def gerar_laudo_pdf(d, fig, eq_str, inputs):
     c.drawString(50, y, f"Resultado: Min (R$ {d['min']:,.2f}) | Medio (R$ {d['vu']:,.2f}) | Max (R$ {d['max']:,.2f})")
     c.drawString(50, y-20, f"Valor Total Estimado: R$ {d['total']:,.2f}")
     
-    img_buf = io.BytesIO()
-    fig.savefig(img_buf, format='png')
-    img_buf.seek(0)
-    c.drawImage(ImageReader(img_buf), 50, y-250, width=400, height=200)
+    if fig is not None:
+        img_buf = io.BytesIO()
+        fig.savefig(img_buf, format='png')
+        img_buf.seek(0)
+        c.drawImage(ImageReader(img_buf), 50, y-250, width=400, height=200)
     c.save(); buffer.seek(0)
     return buffer
 
 arquivo = st.sidebar.file_uploader("Carregar CSV", type=["csv", "txt"])
+fig = None # Inicializa como None para evitar NameError
+
 if arquivo:
     raw_data = arquivo.getvalue().decode('latin-1')
     sep = ';' if raw_data.count(';') > raw_data.count(',') else ','
     df = pd.read_csv(io.StringIO(raw_data), sep=sep)
     df.columns = [normalizar(c) for c in df.columns]
     
-    cols = df.columns.tolist()
-    target = st.sidebar.selectbox("Coluna Valor Unitario:", cols)
-    features = st.sidebar.multiselect("Variaveis Explicativas:", [c for c in cols if c != target])
+    target = st.sidebar.selectbox("Coluna Valor Unitario:", df.columns.tolist())
+    features = st.sidebar.multiselect("Variaveis Explicativas:", [c for c in df.columns if c != target])
     
     if features and target:
         df_c = df.copy()
@@ -77,15 +79,22 @@ if arquivo:
             ax2.scatter(modelo.predict(df_c[features]), df_c[target] - modelo.predict(df_c[features])); ax2.axhline(0, color='red'); ax2.set_title("Residuos")
             st.pyplot(fig)
 
-            st.sidebar.header("⚙️ Limites de Extrapolacao")
-            inputs = {}
-            for f in features:
-                # Mostra o limite na tela para o usuário saber onde está
-                min_val, max_val = df_c[f].min(), df_c[f].max()
-                inputs[f] = st.sidebar.number_input(f"{f} (Min: {min_val:.1f} | Max: {max_val:.1f})", value=float(df_c[f].median()))
+            st.sidebar.header("⚙️ Parametros")
+            inputs = {f: st.sidebar.number_input(f"{f} (Min:{df_c[f].min():.1f} | Max:{df_c[f].max():.1f})", value=float(df_c[f].median())) for f in features}
             
             if st.sidebar.button("Calcular Precificacao"):
                 vu = modelo.predict(np.array([list(inputs.values())]))[0]
                 std = np.std(df_c[target] - modelo.predict(df_c[features]))
                 min_v, max_v = vu - (1.96 * std), vu + (1.96 * std)
-                col_area = next((
+                
+                col_area = next((c for c in features if 'area' in c), None)
+                total = vu * inputs[col_area] if col_area else vu
+                
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Minimo", f"R$ {min_v:,.2f}")
+                c2.metric("Medio", f"R$ {vu:,.2f}")
+                c3.metric("Maximo", f"R$ {max_v:,.2f}")
+                st.metric("Valor Total Estimado", f"R$ {total:,.2f}")
+                
+                pdf = gerar_laudo_pdf({'vu': vu, 'min': min_v, 'max': max_v, 'total': total}, fig, eq_str, inputs)
+                st.download_button("📥 Baixar Laudo Completo", pdf, "laudo_tecnico.pdf")
