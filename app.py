@@ -115,7 +115,7 @@ if arquivo_upload:
         if 'Padrao_Acabamento' in variaveis_independentes:
             caracteristicas_avaliando['Padrao_Acabamento'] = st.sidebar.selectbox("Padrão de Acabamento", [1, 2, 3], index=1, format_func=lambda x: {1:"Baixo / Econômico", 2:"Médio / Normal", 3:"Alto / Luxo"}[x])
         if 'Setor_Urbano' in variaveis_independentes:
-            caracteristicas_avaliando['Setor_Urbano'] = st.sidebar.number_input("Fator de Bairro / Localização", value=1.0, step=0.1)
+            caracteristicas_avaliando['Setor_Urbano'] = st.sidebar.number_input("Setor_Urbano", value=1.0, step=0.1)
         if 'Data_Evento' in variaveis_independentes:
             caracteristicas_avaliando['Data_Evento'] = st.sidebar.number_input("Data do Evento (Ano ou Mês numérico)", value=2026.0, step=1.0)
         if 'Evento' in variaveis_independentes:
