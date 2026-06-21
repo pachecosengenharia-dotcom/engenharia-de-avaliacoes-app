@@ -15,11 +15,27 @@ if arquivo_csv is not None:
     
     # 2. Definição explícita das colunas que são números
     # Estas são as colunas que estão exatamente no seu CSV
+    # 2. Definição explícita das colunas que são números
     cols_numericas = [
         'Área Privativa', 'Área do Terreno', 'Quartos', 'Evento', 
         'Padrão de Acabamento', 'Suite', 'Estado de Conservação', 
-        'Idade Aparente', 'Setor urbano', 'Data do Evento', 'Valor Total'
+        'Idade Aparente', 'Setor urbano', 'Data do Evento' 
+        # 'Valor Total' foi removido desta lista propositalmente
     ]
+    col_alvo = 'Valor Unitário'
+    
+    # ... (seu código de limpeza e conversão segue o mesmo) ...
+
+    # 4. Ajuste do Modelo
+    # Aqui garantimos que apenas as colunas da lista acima entrem no X
+    features = [c for c in cols_numericas if c in df_clean.columns]
+    
+    X = df_clean[features]
+    y = df_clean[col_alvo]
+    
+    modelo = LinearRegression().fit(X, y)
+    
+    st.success(f"Modelo treinado! Variáveis utilizadas: {features}")
     
     # 3. Limpeza rigorosa: converte tudo para float, tratando vírgula decimal
     df_clean = pd.DataFrame()
