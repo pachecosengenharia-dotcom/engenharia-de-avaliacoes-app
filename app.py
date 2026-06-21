@@ -33,7 +33,7 @@ if arquivo_upload:
     # Limpeza simples e segura das colunas (remove espaços nas pontas)
     df.columns = df.columns.astype(str).str.strip()
 
-    # Dicionário calibrado EXATAMENTE com os cabeçalhos reais da sua planilha
+    # Dicionário calibrado com os cabeçalhos reais da sua planilha
     colunas_possiveis = {
         'Preco': ['Preco', 'Preço', 'Valor', 'Vlr', 'PRECO', 'PREÇO', 'Valor Total', 'Valor_Total'],
         'Area_Construida': ['Area_Construida', 'Área_Construída', 'Area Construida', 'Área Construída', 'Area Const', 'Área Const', 'AREA_CONSTRUIDA', 'Área Privativa', 'Area Privativa'],
@@ -61,16 +61,31 @@ if arquivo_upload:
         todas_vars = ['Area_Construida', 'Area_Terreno', 'Quartos', 'Suites', 'Vagas', 'Conservacao', 'Padrao_Acabamento', 'Setor_Urbano', 'Data_Evento', 'Evento']
         variaveis_independentes = [v for v in todas_vars if v in df.columns]
 
+        # NOVA FUNÇÃO DE LIMPEZA DE NÚMEROS: Muito mais forte e adaptada para Excel brasileiro
         def limpar_numero(valor):
             txt = str(valor).strip().replace('R$', '').replace(' ', '')
             if not txt or txt.lower() in ['nan', 'null', '']: return np.nan
-            if ',' in txt and '.' in txt: txt = txt.replace('.', '')
-            txt = txt.replace(',', '.')
+            
+            # Se tiver pontos e vírgula (ex: 1.500.000,00), remove os pontos e troca a vírgula por ponto
+            if ',' in txt and '.' in txt:
+                if txt.find('.') < txt.find(','): # Formato 1.234,56
+                    txt = txt.replace('.', '')
+                else: # Formato 1,234.56
+                    txt = txt.replace(',', '')
+            
+            # Se tiver apenas vírgula, muda para ponto decimal (ex: 1500,50 -> 1500.50)
+            if ',' in txt and '.' not in txt:
+                txt = txt.replace(',', '.')
+                
+            # Remove qualquer outro carácter que não seja número ou o ponto decimal
             txt = re.sub(r'[^\d.]', '', txt)
-            try: return float(txt)
-            except: return np.nan
+            
+            try: 
+                return float(txt)
+            except: 
+                return np.nan
 
-        # Limpeza numérica estrita de todas as colunas
+        # Limpeza numérica de todas as colunas
         df['Preco'] = df['Preco'].astype(str).apply(limpar_numero)
         for col in variaveis_independentes:
             df[col] = df[col].astype(str).apply(limpar_numero)
@@ -79,6 +94,7 @@ if arquivo_upload:
             else:
                 df[col] = df[col].fillna(df[col].median() if not df[col].isnull().all() else 1.0)
 
+        # Remove linhas com valores nulos nas colunas principais
         df = df.dropna(subset=['Preco', 'Area_Construida'])
 
         # Painel de Controle Lateral Dinâmico
@@ -125,10 +141,8 @@ if arquivo_upload:
             X = df[variaveis_independentes]
             y = df['Preco']
             
-            # Converte para matriz NumPy pura eliminando dependência estrita de nomes no fit/predict
             modelo = Ridge(alpha=1.0).fit(X.values, y.values)
             
-            # Monta os dados de teste seguindo exatamente a ordem correta das colunas
             dados_imovel_lista = [caracteristicas_avaliando[var] for var in variaveis_independentes]
             dados_imovel = np.array([dados_imovel_lista])
             
@@ -138,3 +152,45 @@ if arquivo_upload:
 
             # Exibição dos Resultados
             c1, c2, c3 = st.columns(3)
+            c1.metric("Valor de Mercado Estimado", f"R$ {preco_estimado:,.2f}")
+            c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
+            c3.metric("Precisão do Modelo (R²)", f"{f'{r2_score*100:.2f}%' if r2_score > 0 else 'N/A'}")
+
+            st.info(f"📐 **Variáveis processadas no cálculo multifatorial:** {', '.join(variaveis_independentes)}")
+
+            # Gráfico
+            fig, ax = plt.subplots(figsize=(8, 3.5))
+            sns.scatterplot(data=df, x='Area_Construida', y='Preco', color='#002d62', alpha=0.6, ax=ax, label="Amostras de Mercado")
+            ax.scatter([caracteristicas_avaliando['Area_Construida']], [preco_estimado], color='#d9534f', s=150, marker='*', label="Imóvel Avaliando")
+            ax.set_title("Gráfico de Dispersão - Engenharia de Avaliações")
+            ax.grid(True, alpha=0.3)
+            st.pyplot(fig)
+
+            # Relatório PDF
+            img_buf = io.BytesIO()
+            fig.savefig(img_buf, format='png', dpi=200)
+            img_buf.seek(0)
+            
+            pdf_buf = io.BytesIO()
+            doc = SimpleDocTemplate(pdf_buf, pagesize=letter)
+            styles = getSampleStyleSheet()
+            
+            detalhes_texto = " | ".join([f"<b>{k}:</b> {v}" for k, v in caracteristicas_avaliando.items()])
+            story = [
+                Paragraph("LAUDO DE AVALIAÇÃO TÉCNICA MERCADOLÓGICA", ParagraphStyle('T', fontSize=18, textColor=colors.HexColor('#002d62'), alignment=1)),
+                Spacer(1, 15),
+                Paragraph(detalhes_texto, styles['Normal']),
+                Spacer(1, 5),
+                Paragraph(f"<b>Valor de Mercado Inferido: R$ {preco_estimado:,.2f}</b>", styles['Normal']),
+                Spacer(1, 15),
+                Image(img_buf, width=400, height=180)
+            ]
+            doc.build(story)
+            pdf_buf.seek(0)
+
+            st.sidebar.markdown("---")
+            st.sidebar.download_button(label="📥 Baixar Laudo Oficial (PDF)", data=pdf_buf, file_name="Laudo_Tecnico_Profissional.pdf", mime="application/pdf")
+        else:
+            st.warning(f"⚠️ Atenção: Nenhuma linha da planilha pôde ser convertida em número. Verifique se a sua coluna 'Valor Total' possui dados válidos. Linhas identificadas: {len(df)}.")
+else:
+    st.info("💡 Por favor, faça o upload de uma planilha .csv na barra lateral para iniciar.")
