@@ -2,60 +2,45 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+import io
+import matplotlib.pyplot as plt
 
-st.set_page_config(layout="wide")
-st.title("📊 Engenharia de Avaliações - Goiânia")
+# [Configuração do App e Leitura de dados conforme anterior...]
+# ... (manter a leitura e limpeza de dados que já funciona)
 
-try:
-    # 1. Leitura
-    df = pd.read_csv("Goiânia - GO.csv", sep=";", encoding='latin-1')
-    df.columns = [c.strip() for c in df.columns]
+# 1. Obter Equação da Regressão
+coefs = dict(zip(X.columns, modelo.coef_))
+equacao = f"V.U. = {modelo.intercept_:.2f} "
+for var, coef in coefs.items():
+    equacao += f"+ ({coef:.2f} * {var}) "
 
-    # 2. Mapeamento Inteligente
-    def encontrar_coluna(lista_possiveis):
-        for nome in lista_possiveis:
-            if nome in df.columns: return nome
-        return None
+st.subheader("Equação da Regressão")
+st.latex(equacao)
 
-    alvo_unit = encontrar_coluna(['Valor Unitário', 'Valor Unitario'])
-    area = encontrar_coluna(['Área Construída', 'Area Construida', 'Área Privativa', 'Area Privativa'])
+# 2. Gerar PDF
+def gerar_pdf():
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    c.drawString(100, 800, "Laudo Técnico de Avaliação Imobiliária")
+    c.drawString(100, 780, f"Equação: {equacao}")
     
-    features_base = [
-        area, 'Área do Terreno', 'Evento', 
-        'Padrão de Acabamento', 'Estado de Conservação', 
-        'Setor urbano', 'Data do Evento', 'Quartos', 'Suite'
-    ]
-    features = [f for f in features_base if f is not None]
+    # Adicionar lista de dados ao PDF
+    text = c.beginText(100, 750)
+    text.textLines(df_modelo.head(10).to_string()) # Primeiros 10 dados
+    c.drawText(text)
+    
+    c.save()
+    buffer.seek(0)
+    return buffer
 
-    # 3. Limpeza
-    df_modelo = pd.DataFrame()
-    df_modelo[alvo_unit] = pd.to_numeric(df[alvo_unit].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
-    df_modelo[area] = pd.to_numeric(df[area].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
-    
-    for col in features:
-        if col in df.columns and col != area:
-            df_modelo[col] = pd.to_numeric(df[col].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
-    
-    df_modelo = df_modelo.dropna()
-    
-    # 4. Regressão
-    X = df_modelo.drop(columns=[alvo_unit])
-    y = df_modelo[alvo_unit]
-    modelo = LinearRegression().fit(X, y)
-    
-    # 5. Interface
-    st.sidebar.header("⚙️ Parâmetros do Imóvel")
-    inputs = {}
-    for col in X.columns:
-        inputs[col] = st.sidebar.number_input(f"{col}", value=float(df_modelo[col].median()))
-    
-    # 6. Cálculo e Exibição
-    pred_unit = modelo.predict([list(inputs.values())])[0]
-    pred_total = pred_unit * inputs[area] # Cálculo do Valor Total baseado na área
-    
-    col1, col2 = st.columns(2)
-    col1.metric("Valor Unitário Estimado", f"R$ {pred_unit:,.2f} / m²")
-    col2.metric("Valor Total Estimado", f"R$ {pred_total:,.2f}")
-    
-except Exception as e:
-    st.error(f"Erro: {e}")
+# 3. Botão de Download do PDF
+pdf_data = gerar_pdf()
+st.download_button("📥 Baixar Laudo em PDF", data=pdf_data, file_name="laudo_avaliacao.pdf")
+
+# 4. Exibir Dados e Gráficos no App
+st.subheader("Lista de Dados Utilizados")
+st.dataframe(df_modelo)
+
+st.subheader("Diagnóstico de Aderência")
