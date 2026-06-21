@@ -15,56 +15,66 @@ import os
 st.set_page_config(page_title="Engenharia de Avaliações", layout="wide")
 
 st.title("📊 Sistema Profissional de Engenharia de Avaliações")
-st.markdown("Selecione uma região salva no repositório ou insira uma nova planilha de mercado.")
+st.markdown("Selecione uma região salva no seu repositório ou insira uma nova planilha de mercado.")
 
-# --- GERENCIAMENTO DE BANCO DE DADOS (LOCAL OU UPLOAD) ---
+# --- GERENCIAMENTO DE BANCO DE DADOS INTELIGENTE ---
 st.sidebar.header("📁 Base de Dados")
 
-# Verifica se existe a pasta 'dados' com planilhas salvas
-PASTA_DADOS = "dados"
+# Procura arquivos .csv na raiz do projeto e na pasta 'dados' para facilitar no celular
 planilhas_disponiveis = []
+for f in os.listdir('.'):
+    if f.endswith('.csv'):
+        planilhas_disponiveis.append(f)
 
-if os.path.exists(PASTA_DADOS):
-    planilhas_disponiveis = [f for f in os.listdir(PASTA_DADOS) if f.endswith('.csv')]
+if os.path.exists("dados"):
+    for f in os.listdir("dados"):
+        if f.endswith('.csv') and f not in planilhas_disponiveis:
+            planilhas_disponiveis.append(os.path.join("dados", f))
 
-# Menu de seleção de região
+# Menu seletor de regiões
 fonte_dados = st.sidebar.selectbox(
     "Escolha a Região/Município",
     options=["Selecionar região salva..."] + planilhas_disponiveis + ["Fazer Upload Manual (.csv)"]
 )
 
-arquivo_alvo = None
 df = None
 
-# Lógica para carregar o arquivo correto
+# Função robusta de leitura com detecção automática de codificação e separador
+def carregar_csv_com_seguranca(caminho_ou_buffer):
+    for enc in ['utf-8', 'latin-1', 'cp1252']:
+        for sep in [';', ',']:
+            try:
+                # Se for uma string (caminho de arquivo), lê direto, senão lê o buffer do upload
+                if isinstance(caminho_ou_buffer, str):
+                    temp_df = pd.read_csv(caminho_ou_buffer, delimiter=sep, encoding=enc)
+                else:
+                    caminho_ou_buffer.seek(0)
+                    temp_df = pd.read_csv(caminho_ou_buffer, delimiter=sep, encoding=enc)
+                
+                if len(temp_df.columns) > 1:
+                    return temp_df
+            except:
+                continue
+    return None
+
+# Carregamento baseado na escolha do usuário
 if fonte_dados and fonte_dados != "Selecionar região salva..." and fonte_dados != "Fazer Upload Manual (.csv)":
-    caminho_arquivo = os.path.join(PASTA_DADOS, fonte_dados)
-    try:
-        df = pd.read_csv(caminho_arquivo, delimiter=';', encoding='latin-1')
-        if len(df.columns) <= 1:
-            df = pd.read_csv(caminho_arquivo, delimiter=',', encoding='latin-1')
-        st.sidebar.success(f"📍 Região carregada: {fonte_dados.replace('.csv', '')}")
-    except Exception as e:
-        st.sidebar.error(f"Erro ao carregar {fonte_dados}: {e}")
+    df = carregar_csv_com_seguranca(fonte_dados)
+    if df is not None:
+        nome_exibicao = os.path.basename(fonte_dados).replace('.csv', '')
+        st.sidebar.success(f"📍 Região carregada com sucesso: {nome_exibicao}")
 
 elif fonte_dados == "Fazer Upload Manual (.csv)":
     arquivo_upload = st.sidebar.file_uploader("Arraste sua planilha (.csv)", type=["csv"])
     if arquivo_upload:
-        try:
-            df = pd.read_csv(arquivo_upload, delimiter=';', encoding='latin-1')
-            if len(df.columns) <= 1:
-                df = pd.read_csv(arquivo_upload, delimiter=',', encoding='latin-1')
-        except:
-            df = pd.read_csv(arquivo_upload, delimiter=',', encoding='latin-1')
+        df = carregar_csv_com_seguranca(arquivo_upload)
 
-# --- PROCESSAMENTO DOS DADOS ---
+# --- PROCESSAMENTO TÉCNICO DOS DADOS ---
 if df is not None:
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
-
-    # Limpeza simples e segura das colunas (remove espaços nas pontas)
     df.columns = df.columns.astype(str).str.strip()
 
-    # Dicionário calibrado com os cabeçalhos reais das planilhas de Engenharia de Avaliações
+    # Dicionário calibrado EXATAMENTE com os cabeçalhos reais das suas planilhas
     colunas_possiveis = {
         'Preco': ['Preco', 'Preço', 'Valor', 'Vlr', 'PRECO', 'PREÇO', 'Valor Total', 'Valor_Total'],
         'Area_Construida': ['Area_Construida', 'Área_Construída', 'Area Construida', 'Área Construída', 'Area Const', 'Área Const', 'AREA_CONSTRUIDA', 'Área Privativa', 'Area Privativa'],
@@ -79,45 +89,32 @@ if df is not None:
         'Evento': ['Evento', 'EVENTO']
     }
 
-    # Renomeação das colunas identificadas
     for padrao, sinonimos in colunas_possiveis.items():
         for col in df.columns:
             if col in sinonimos:
                 df = df.rename(columns={col: padrao})
 
-    # Obrigatoriedades mínimas
     if 'Preco' not in df.columns or 'Area_Construida' not in df.columns:
-        st.error(f"Não mapeamos as colunas essenciais (Preco e Area_Construida). Colunas atuais detectadas: {list(df.columns)}")
+        st.error(f"Não mapeamos as colunas essenciais (Preço e Área). Verifique os cabeçalhos. Colunas atuais detectadas: {list(df.columns)}")
     else:
         todas_vars = ['Area_Construida', 'Area_Terreno', 'Quartos', 'Suites', 'Vagas', 'Conservacao', 'Padrao_Acabamento', 'Setor_Urbano', 'Data_Evento', 'Evento']
         variaveis_independentes = [v for v in todas_vars if v in df.columns]
 
-        # Limpeza numérica robusta adaptada para Excel brasileiro
         def limpar_numero(valor):
             txt = str(valor).strip().replace('R$', '').replace(' ', '')
             if not txt or txt.lower() in ['nan', 'null', '']: return np.nan
-            
             if ',' in txt and '.' in txt:
-                if txt.find('.') < txt.find(','):
-                    txt = txt.replace('.', '')
-                else:
-                    txt = txt.replace(',', '')
-            
-            if ',' in txt and '.' not in txt:
-                txt = txt.replace(',', '.')
-                
+                if txt.find('.') < txt.find(','): txt = txt.replace('.', '')
+                else: txt = txt.replace(',', '')
+            if ',' in txt and '.' not in txt: txt = txt.replace(',', '.')
             txt = re.sub(r'[^\d.]', '', txt)
             try: return float(txt)
             except: return np.nan
 
-        # Aplicação da limpeza
         df['Preco'] = df['Preco'].astype(str).apply(limpar_numero)
         for col in variaveis_independentes:
             df[col] = df[col].astype(str).apply(limpar_numero)
-            if col == 'Setor_Urbano':
-                df[col] = df[col].fillna(df[col].median() if not df[col].isnull().all() else 500.0)
-            else:
-                df[col] = df[col].fillna(df[col].median() if not df[col].isnull().all() else 1.0)
+            df[col] = df[col].fillna(df[col].median() if not df[col].isnull().all() else 1.0)
 
         df = df.dropna(subset=['Preco', 'Area_Construida'])
 
@@ -141,16 +138,8 @@ if df is not None:
             caracteristicas_avaliando['Padrao_Acabamento'] = st.sidebar.selectbox("Padrão de Acabamento", [1, 2, 3], index=1, format_func=lambda x: {1:"Baixo", 2:"Médio", 3:"Alto"}[x])
         
         if 'Setor_Urbano' in variaveis_independentes:
-            try:
-                valor_inicial = float(df['Setor_Urbano'].median())
-                if np.isnan(valor_inicial): valor_inicial = 500.0
-            except:
-                valor_inicial = 500.0
-                
-            caracteristicas_avaliando['Setor_Urbano'] = st.sidebar.number_input(
-                "Setor_Urbano", min_value=0.0, max_value=5000.0, value=valor_inicial, step=10.0
-            )
-
+            valor_inicial = float(df['Setor_Urbano'].median()) if len(df) > 0 else 500.0
+            caracteristicas_avaliando['Setor_Urbano'] = st.sidebar.number_input("Setor_Urbano", min_value=0.0, max_value=5000.0, value=valor_inicial, step=10.0)
         if 'Data_Evento' in variaveis_independentes:
             caracteristicas_avaliando['Data_Evento'] = st.sidebar.number_input("Data do Evento", value=2026.0, step=1.0)
         if 'Evento' in variaveis_independentes:
@@ -169,7 +158,7 @@ if df is not None:
             r2_score = modelo.score(X.values, y.values)
             limite_inferior, limite_superior = preco_estimado * 0.85, preco_estimado * 1.15
 
-            # Resultados na tela
+            # Exibição dos Resultados Técnicos
             c1, c2, c3 = st.columns(3)
             c1.metric("Valor de Mercado Estimado", f"R$ {preco_estimado:,.2f}")
             c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
@@ -185,7 +174,7 @@ if df is not None:
             ax.grid(True, alpha=0.3)
             st.pyplot(fig)
 
-            # Relatório PDF
+            # Geração do Relatório PDF
             img_buf = io.BytesIO()
             fig.savefig(img_buf, format='png', dpi=200)
             img_buf.seek(0)
@@ -210,6 +199,6 @@ if df is not None:
             st.sidebar.markdown("---")
             st.sidebar.download_button(label="📥 Baixar Laudo Oficial (PDF)", data=pdf_buf, file_name="Laudo_Tecnico_Profissional.pdf", mime="application/pdf")
         else:
-            st.warning(f"⚠️ Amostras numéricas insuficientes na planilha selecionada. Linhas processadas: {len(df)}.")
+            st.warning(f"⚠️ Amostras insuficientes após tratamento. Linhas válidas: {len(df)}.")
 else:
     st.info("💡 Escolha uma região salva no menu lateral ou selecione a opção de upload manual para começar.")
