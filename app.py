@@ -122,50 +122,16 @@ if arquivo_upload:
             caracteristicas_avaliando['Evento'] = st.sidebar.number_input("Fator de Evento", value=1.0, step=0.05)
 
         if len(df) >= 2:
-            # Regressão Ridge para estabilização estatística de múltiplas escalas
+            # GARANTE QUE OS DADOS DE TREINO TENHAM EXATAMENTE A MESMA ORDEM DE COLUNAS DO INPUT
             X = df[variaveis_independentes]
             y = df['Preco']
+            
             modelo = Ridge(alpha=1.0).fit(X, y)
             
-            dados_imovel = np.array([[caracteristicas_avaliando[var] for var in variaveis_independentes]])
+            # Monta o array exatamente combinando a ordem de colunas de X
+            dados_imovel_lista = [caracteristicas_avaliando[var] for var in X.columns]
+            dados_imovel = pd.DataFrame([dados_imovel_lista], columns=X.columns)
+            
             preco_estimado = max(0, modelo.predict(dados_imovel)[0])
             r2_score = modelo.score(X, y)
-            limite_inferior, limite_superior = preco_estimado * 0.85, preco_estimado * 1.15
-
-            # Exibição dos Resultados
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Valor de Mercado Estimado", f"R$ {preco_estimado:,.2f}")
-            c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
-            c3.metric("Precisão do Modelo (R²)", f"{f'{r2_score*100:.2f}%' if r2_score > 0 else 'N/A'}")
-
-            st.info(f"📐 **Variáveis processadas no cálculo multifatorial:** {', '.join(variaveis_independentes)}")
-
-            # Gráfico
-            fig, ax = plt.subplots(figsize=(8, 3.5))
-            sns.scatterplot(data=df, x='Area_Construida', y='Preco', color='#002d62', alpha=0.6, ax=ax, label="Amostras de Mercado")
-            ax.scatter([caracteristicas_avaliando['Area_Construida']], [preco_estimado], color='#d9534f', s=150, marker='*', label="Imóvel Avaliando")
-            ax.set_title("Gráfico de Dispersão - Engenharia de Avaliações")
-            ax.grid(True, alpha=0.3)
-            st.pyplot(fig)
-
-            # Relatório PDF
-            img_buf = io.BytesIO()
-            fig.savefig(img_buf, format='png', dpi=200)
-            img_buf.seek(0)
-            
-            pdf_buf = io.BytesIO()
-            doc = SimpleDocTemplate(pdf_buf, pagesize=letter)
-            styles = getSampleStyleSheet()
-            
-            detalhes_texto = " | ".join([f"<b>{k}:</b> {v}" for k, v in caracteristicas_avaliando.items()])
-            story = [
-                Paragraph("LAUDO DE AVALIAÇÃO TÉCNICA MERCADOLÓGICA", ParagraphStyle('T', fontSize=18, textColor=colors.HexColor('#002d62'), alignment=1)),
-                Spacer(1, 15),
-                Paragraph(detalhes_texto, styles['Normal']),
-                Spacer(1, 5),
-                Paragraph(f"<b>Valor de Mercado Inferido: R$ {preco_estimado:,.2f}</b>", styles['Normal']),
-                Spacer(1, 15),
-                Image(img_buf, width=400, height=180)
-            ]
-            doc.build(story)
-            pdf_buf.
+            limite_inferior, limite_superior = preco_estimado * 0.85,
