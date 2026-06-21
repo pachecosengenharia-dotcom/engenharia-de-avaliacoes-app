@@ -30,8 +30,8 @@ if arquivo_upload:
         
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
 
-    # Limpeza profunda nos nomes das colunas para arrancar hífens, espaços e caracteres indesejados nas pontas
-    df.columns = [re.sub(r'^[^\w]+|[^\w]+$', '', col).strip() for col in df.columns]
+    # Limpeza simples e segura das colunas (remove espaços nas pontas)
+    df.columns = df.columns.astype(str).str.strip()
 
     # Dicionário de padronização estrita de colunas
     colunas_possiveis = {
@@ -100,7 +100,7 @@ if arquivo_upload:
         if 'Padrao_Acabamento' in variaveis_independentes:
             caracteristicas_avaliando['Padrao_Acabamento'] = st.sidebar.selectbox("Padrão de Acabamento", [1, 2, 3], index=1, format_func=lambda x: {1:"Baixo", 2:"Médio", 3:"Alto"}[x])
         
-        # Campo numérico totalmente blindado e fixado contra erros de limites (0 a 5000)
+        # Campo numérico para Setor Urbano (0 a 5000)
         if 'Setor_Urbano' in variaveis_independentes:
             try:
                 valor_inicial = float(df['Setor_Urbano'].median())
@@ -126,7 +126,7 @@ if arquivo_upload:
             X = df[variaveis_independentes]
             y = df['Preco']
             
-            # .values converte para matriz NumPy pura eliminando dependência estrita de nomes no fit/predict
+            # Converte para matriz NumPy pura eliminando dependência estrita de nomes no fit/predict
             modelo = Ridge(alpha=1.0).fit(X.values, y.values)
             
             # Monta os dados de teste seguindo exatamente a ordem correta das colunas
@@ -159,4 +159,25 @@ if arquivo_upload:
             img_buf.seek(0)
             
             pdf_buf = io.BytesIO()
-            doc = SimpleDoc
+            doc = SimpleDocTemplate(pdf_buf, pagesize=letter)
+            styles = getSampleStyleSheet()
+            
+            detalhes_texto = " | ".join([f"<b>{k}:</b> {v}" for k, v in caracteristicas_avaliando.items()])
+            story = [
+                Paragraph("LAUDO DE AVALIAÇÃO TÉCNICA MERCADOLÓGICA", ParagraphStyle('T', fontSize=18, textColor=colors.HexColor('#002d62'), alignment=1)),
+                Spacer(1, 15),
+                Paragraph(detalhes_texto, styles['Normal']),
+                Spacer(1, 5),
+                Paragraph(f"<b>Valor de Mercado Inferido: R$ {preco_estimado:,.2f}</b>", styles['Normal']),
+                Spacer(1, 15),
+                Image(img_buf, width=400, height=180)
+            ]
+            doc.build(story)
+            pdf_buf.seek(0)
+
+            st.sidebar.markdown("---")
+            st.sidebar.download_button(label="📥 Baixar Laudo Oficial (PDF)", data=pdf_buf, file_name="Laudo_Tecnico_Profissional.pdf", mime="application/pdf")
+        else:
+            st.warning(f"Amostras insuficientes após tratamento. Linhas válidas na planilha: {len(df)}.")
+else:
+    st.info("💡 Por favor, faça o upload de uma planilha .csv na barra lateral para iniciar.")
