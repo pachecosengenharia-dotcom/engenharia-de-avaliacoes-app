@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import os
 
 st.set_page_config(layout="wide")
-st.title("📊 Engenharia de Avaliações - Modelo Final")
+st.title("📊 Engenharia de Avaliações - Laudo Técnico")
 
 arquivos = [f for f in os.listdir('.') if f.endswith('.csv')]
 regiao = st.sidebar.selectbox("Selecione a Região:", arquivos)
@@ -16,13 +16,9 @@ if regiao:
         df = pd.read_csv(regiao, sep=";", encoding='latin-1')
         df.columns = [c.strip() for c in df.columns]
 
-        # 1. FORÇAR ALVO CORRETO
         col_alvo = 'Valor Unitário'
-        
-        # 2. Selecionar apenas variáveis de entrada válidas (excluir o alvo da lista)
         features = [c for c in df.columns if c != col_alvo and pd.to_numeric(df[c].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce').notna().sum() > len(df)*0.5]
 
-        # 3. Limpeza
         df_modelo = df[features + [col_alvo]].apply(lambda x: pd.to_numeric(x.astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce'))
         df_modelo = df_modelo.dropna()
 
@@ -30,29 +26,42 @@ if regiao:
             X = df_modelo[features]
             y = df_modelo[col_alvo]
             modelo = LinearRegression().fit(X, y)
+            
+            # 1. Equação
+            st.subheader("Equação do Modelo")
+            intercept = modelo.intercept_
+            eq_str = f"V.U. = {intercept:.2f} " + " ".join([f"+ ({c:.2f} * {n})" for n, c in zip(features, modelo.coef_)])
+            st.latex(eq_str)
 
-            # 4. Interface e Cálculo
+            # 2. Parâmetros e Cálculos
             st.sidebar.header("⚙️ Parâmetros do Imóvel")
-            inputs = [st.sidebar.number_input(f"{col}", value=float(df_modelo[col].median())) for col in features]
+            inputs = [st.sidebar.number_input(f"{n}", value=float(df_modelo[n].median())) for n in features]
             
             pred_unit = modelo.predict([inputs])[0]
+            residuos = y - modelo.predict(X)
+            erro_padrao = np.std(residuos)
             
-            # Cálculo de Valor Total (procurando área construída dinamicamente)
-            col_area = next((c for c in features if 'área' in c.lower() and 'construída' in c.lower()), features[0])
-            area = inputs[features.index(col_area)] if col_area in features else 1
+            # Mínimo e Máximo (95% confiança)
+            minimo, maximo = pred_unit - (1.96 * erro_padrao), pred_unit + (1.96 * erro_padrao)
+            area = inputs[features.index(next((c for c in features if 'área' in c.lower()), features[0]))]
             
-            col1, col2 = st.columns(2)
-            col1.metric("Valor Unitário Estimado", f"R$ {pred_unit:,.2f} / m²")
-            col2.metric("Valor Total Estimado", f"R$ {pred_unit * area:,.2f}")
-            
-            # Gráfico
-            st.subheader("Análise de Aderência")
-            fig, ax = plt.subplots()
-            ax.scatter(y, modelo.predict(X), alpha=0.5)
-            ax.plot([y.min(), y.max()], [y.min(), y.max()], 'r--')
-            st.pyplot(fig)
-        else:
-            st.error("Não foram encontrados dados numéricos suficientes para o cálculo.")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("V.U. Mínimo", f"R$ {minimo:,.2f}")
+            col2.metric("V.U. Médio", f"R$ {pred_unit:,.2f}")
+            col3.metric("V.U. Máximo", f"R$ {maximo:,.2f}")
+            st.metric("Valor Total (Médio)", f"R$ {pred_unit * area:,.2f}")
 
+            # 3. Gráficos
+            st.subheader("Diagnóstico de Aderência e Resíduos")
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+            ax1.scatter(y, modelo.predict(X), alpha=0.5)
+            ax1.set_title("Observado vs Previsto")
+            ax2.scatter(modelo.predict(X), residuos, alpha=0.5, color='orange')
+            ax2.axhline(0, color='black', linestyle='--')
+            ax2.set_title("Resíduos")
+            st.pyplot(fig)
+
+        else:
+            st.error("Dados insuficientes.")
     except Exception as e:
-        st.error(f"Erro ao processar: {e}")
+        st.error(f"Erro: {e}")
