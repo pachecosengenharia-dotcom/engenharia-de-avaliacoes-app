@@ -30,8 +30,8 @@ if arquivo_upload:
         
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
 
-    # Ajuste de nomes de colunas sem espaços nas pontas
-    df.columns = df.columns.str.strip()
+    # Limpeza profunda nos nomes das colunas para arrancar hífens, espaços e caracteres indesejados nas pontas
+    df.columns = [re.sub(r'^[^\w]+|[^\w]+$', '', col).strip() for col in df.columns]
 
     # Dicionário de padronização estrita de colunas
     colunas_possiveis = {
@@ -122,16 +122,41 @@ if arquivo_upload:
             caracteristicas_avaliando['Evento'] = st.sidebar.number_input("Fator de Evento", value=1.0, step=0.05)
 
         if len(df) >= 2:
-            # GARANTE QUE OS DADOS DE TREINO TENHAM EXATAMENTE A MESMA ORDEM DE COLUNAS DO INPUT
+            # Seleção de variáveis estável
             X = df[variaveis_independentes]
             y = df['Preco']
             
-            modelo = Ridge(alpha=1.0).fit(X, y)
+            # .values converte para matriz NumPy pura eliminando dependência estrita de nomes no fit/predict
+            modelo = Ridge(alpha=1.0).fit(X.values, y.values)
             
-            # Monta o array exatamente combinando a ordem de colunas de X
-            dados_imovel_lista = [caracteristicas_avaliando[var] for var in X.columns]
-            dados_imovel = pd.DataFrame([dados_imovel_lista], columns=X.columns)
+            # Monta os dados de teste seguindo exatamente a ordem correta das colunas
+            dados_imovel_lista = [caracteristicas_avaliando[var] for var in variaveis_independentes]
+            dados_imovel = np.array([dados_imovel_lista])
             
             preco_estimado = max(0, modelo.predict(dados_imovel)[0])
-            r2_score = modelo.score(X, y)
-            limite_inferior, limite_superior = preco_estimado * 0.85,
+            r2_score = modelo.score(X.values, y.values)
+            limite_inferior, limite_superior = preco_estimado * 0.85, preco_estimado * 1.15
+
+            # Exibição dos Resultados
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Valor de Mercado Estimado", f"R$ {preco_estimado:,.2f}")
+            c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
+            c3.metric("Precisão do Modelo (R²)", f"{f'{r2_score*100:.2f}%' if r2_score > 0 else 'N/A'}")
+
+            st.info(f"📐 **Variáveis processadas no cálculo multifatorial:** {', '.join(variaveis_independentes)}")
+
+            # Gráfico
+            fig, ax = plt.subplots(figsize=(8, 3.5))
+            sns.scatterplot(data=df, x='Area_Construida', y='Preco', color='#002d62', alpha=0.6, ax=ax, label="Amostras de Mercado")
+            ax.scatter([caracteristicas_avaliando['Area_Construida']], [preco_estimado], color='#d9534f', s=150, marker='*', label="Imóvel Avaliando")
+            ax.set_title("Gráfico de Dispersão - Engenharia de Avaliações")
+            ax.grid(True, alpha=0.3)
+            st.pyplot(fig)
+
+            # Relatório PDF
+            img_buf = io.BytesIO()
+            fig.savefig(img_buf, format='png', dpi=200)
+            img_buf.seek(0)
+            
+            pdf_buf = io.BytesIO()
+            doc = SimpleDoc
