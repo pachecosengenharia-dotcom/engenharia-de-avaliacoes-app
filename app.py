@@ -1,176 +1,88 @@
 import streamlit as st
-
 import pandas as pd
-
 import numpy as np
-
-from sklearn.linear_model import LinearRegression
-
-import matplotlib.pyplot as plt
-
-import os
-
+import re
 import io
-
+import pdfplumber
+from sklearn.linear_model import LinearRegression
 from reportlab.lib.pagesizes import A4
-
 from reportlab.pdfgen import canvas
 
+# --- 1. FUNÇÕES AUXILIARES DE ENGENHARIA ---
+def extrair_atributos_do_texto(texto):
+    """Extrai área e dados básicos via Regex."""
+    atributos = {}
+    match_area = re.search(r'(?:Área|Área Total|Área Útil)\D*(\d+[\.,]?\d*)', texto, re.IGNORECASE)
+    if match_area:
+        atributos['area'] = float(match_area.group(1).replace(',', '.'))
+    return atributos
 
+def validar_dados_imovel(dados):
+    """Validação técnica para evitar erros de precificação."""
+    if 'area' in dados and not (20 <= dados['area'] <= 2000):
+        return False, f"Área de {dados['area']}m² fora dos limites aceitáveis (20-2000m²)."
+    return True, None
 
-st.set_page_config(layout="wide")
-
-st.title("📊 Engenharia de Avaliações - Laudo Técnico")
-
-
-
-arquivos = [f for f in os.listdir('.') if f.endswith('.csv')]
-
-regiao = st.sidebar.selectbox("Selecione a Região:", arquivos)
-
-
-
-def gerar_pdf(pred_unit, pred_total, minimo, maximo, eq_str):
-
+def gerar_laudo_pdf(endereco, valor_medio, eq_str):
     buffer = io.BytesIO()
-
     c = canvas.Canvas(buffer, pagesize=A4)
-
     c.setFont("Helvetica-Bold", 16)
-
     c.drawString(50, 800, "Laudo Técnico de Avaliação Imobiliária")
-
     c.setFont("Helvetica", 12)
-
-    c.drawString(50, 770, f"Equação: {eq_str}")
-
-    c.drawString(50, 740, f"V.U. Mínimo: R$ {minimo:,.2f} | Médio: R$ {pred_unit:,.2f} | Máximo: R$ {maximo:,.2f}")
-
-    c.drawString(50, 710, f"Valor Total: R$ {pred_total:,.2f}")
-
+    c.drawString(50, 770, f"Endereço: {endereco}")
+    c.drawString(50, 750, f"Equação: {eq_str}")
+    c.drawString(50, 730, f"Valor Médio Estimado: R$ {valor_medio:,.2f}")
     c.save()
-
     buffer.seek(0)
-
     return buffer
 
+# --- 2. INTERFACE E LÓGICA ---
+st.set_page_config(layout="wide")
+st.title("📊 AVM - Engenharia de Avaliações")
 
+# Upload do CSV de base
+arquivo_csv = st.sidebar.file_uploader("Carregar Base de Dados (CSV)", type="csv")
+if arquivo_csv:
+    df = pd.read_csv(arquivo_csv, sep=";", encoding='latin-1')
+    
+    # [Lógica do Modelo - Simplificada para o exemplo]
+    col_alvo = 'Valor Unitário'
+    features = [c for c in df.columns if c != col_alvo]
+    X, y = df[features], df[col_alvo]
+    modelo = LinearRegression().fit(X, y)
+    eq_str = " + ".join([f"{c:.2f}*{n}" for n, c in zip(features, modelo.coef_)])
 
-if regiao:
+    # Entrada de Dados
+    st.sidebar.subheader("📍 Entrada do Imóvel")
+    tipo_input = st.sidebar.radio("Fonte de Dados:", ["Manual", "Via PDF"])
+    
+    dados_imovel = {n: 0.0 for n in features}
+    endereco = st.sidebar.text_input("Endereço do Imóvel:")
 
-    try:
+    if tipo_input == "Via PDF":
+        doc = st.sidebar.file_uploader("Subir Laudo/Escritura", type="pdf")
+        if doc:
+            texto = pdfplumber.open(doc).pages[0].extract_text()
+            extraidos = extrair_atributos_do_texto(texto)
+            valido, msg = validar_dados_imovel(extraidos)
+            if valido:
+                st.sidebar.success("Dados validados com sucesso!")
+                for k, v in extraidos.items(): dados_imovel[k] = v
+            else:
+                st.sidebar.error(msg)
+    else:
+        for f in features:
+            dados_imovel[f] = st.sidebar.number_input(f"{f}", value=float(df[f].median()))
 
-        df = pd.read_csv(regiao, sep=";", encoding='latin-1')
-
-        df.columns = [c.strip() for c in df.columns]
-
-
-
-        col_alvo = 'Valor Unitário'
-
-        # Seleção dinâmica de variáveis numéricas
-
-        features = [c for c in df.columns if c != col_alvo and pd.to_numeric(df[c].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce').notna().sum() > len(df)*0.5]
-
+    # Execução
+    if st.button("Calcular Avaliação"):
+        input_array = np.array([dados_imovel[f] for f in features]).reshape(1, -1)
+        pred = modelo.predict(input_array)[0]
         
+        st.metric("Valor Unitário Estimado", f"R$ {pred:,.2f}")
+        
+        pdf_gerado = gerar_laudo_pdf(endereco, pred, eq_str)
+        st.download_button("📥 Baixar Laudo Completo", data=pdf_gerado, file_name="laudo.pdf")
 
-        df_modelo = df[features + [col_alvo]].apply(lambda x: pd.to_numeric(x.astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce'))
-
-        df_modelo = df_modelo.dropna()
-
-
-
-        if not df_modelo.empty:
-
-            X = df_modelo[features]
-
-            y = df_modelo[col_alvo]
-
-            modelo = LinearRegression().fit(X, y)
-
-            
-
-            # Equação para o Laudo
-
-            eq_str = f"V.U. = {modelo.intercept_:.2f} " + " ".join([f"+ ({c:.2f} * {n})" for n, c in zip(features, modelo.coef_)])
-
-            st.subheader("Equação do Modelo")
-
-            st.latex(eq_str)
-
-
-
-            # Cálculos de Parâmetros
-
-            st.sidebar.header("⚙️ Parâmetros do Imóvel")
-
-            inputs = [st.sidebar.number_input(f"{n}", value=float(df_modelo[n].median())) for n in features]
-
-            pred_unit = modelo.predict([inputs])[0]
-
-            
-
-            # Cálculo de amplitude (resíduos)
-
-            residuos = y - modelo.predict(X)
-
-            erro_padrao = np.std(residuos)
-
-            minimo, maximo = pred_unit - (1.96 * erro_padrao), pred_unit + (1.96 * erro_padrao)
-
-            area = inputs[features.index(next((c for c in features if 'área' in c.lower()), features[0]))] if any('área' in f.lower() for f in features) else 1
-
-            
-
-            # Métricas
-
-            col1, col2, col3 = st.columns(3)
-
-            col1.metric("V.U. Mínimo", f"R$ {minimo:,.2f}")
-
-            col2.metric("V.U. Médio", f"R$ {pred_unit:,.2f}")
-
-            col3.metric("V.U. Máximo", f"R$ {maximo:,.2f}")
-
-            st.metric("Valor Total (Médio)", f"R$ {pred_unit * area:,.2f}")
-
-
-
-            # Diagnóstico visual
-
-            n, p = len(y), len(features) + 1
-
-            X_mat = np.column_stack([np.ones(n), X])
-
-            leverage = np.diag(X_mat @ np.linalg.inv(X_mat.T @ X_mat) @ X_mat.T)
-
-            cooks_dist = (residuos**2 / (p * np.var(residuos))) * (leverage / (1 - leverage)**2)
-
-            
-
-            fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
-
-            ax1.scatter(y, modelo.predict(X), alpha=0.5); ax1.set_title("Aderência (Obs vs Prev)")
-
-            ax2.scatter(modelo.predict(X), residuos, alpha=0.5, color='orange'); ax2.axhline(0, color='black', linestyle='--'); ax2.set_title("Resíduos")
-
-            ax3.stem(cooks_dist); ax3.set_title("Distância de Cook")
-
-            st.pyplot(fig)
-
-
-
-            # Botão de Download
-
-            pdf_data = gerar_pdf(pred_unit, pred_unit * area, minimo, maximo, eq_str)
-
-            st.download_button("📥 Baixar Laudo Completo em PDF", data=pdf_data, file_name="laudo_avaliacao.pdf", mime="application/pdf")
-
-        else:
-
-            st.error("Dados insuficientes.")
-
-    except Exception as e:
-
-        st.error(f"Erro técnico: {e}") 
-
+else:
+    st.info("Por favor, carregue o arquivo CSV de amostras para iniciar.")
