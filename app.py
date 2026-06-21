@@ -32,28 +32,43 @@ if arquivo_upload:
 
     # Mapeamento Inteligente de Colunas
     mapeamento_colunas = {}
+    colunas_encontradas = set()
+    
     for col in df.columns:
         col_normalizada = col.lower().strip()
-        if any(x in col_normalizada for x in ['prec', 'val', 'vlr', 'montante']): mapeamento_colunas[col] = 'Preco'
-        elif any(x in col_normalizada for x in ['are', 'm2', 'm²', 'metrag', 'dimen']): mapeamento_colunas[col] = 'Area'
-        elif any(x in col_normalizada for x in ['quart', 'dorm', 'quar']): mapeamento_colunas[col] = 'Quartos'
-        elif any(x in col_normalizada for x in ['vag', 'garag']): mapeamento_colunas[col] = 'Vagas'
-        elif any(x in col_normalizada for x in ['cons', 'estad']): mapeamento_colunas[col] = 'Conservacao'
-        elif any(x in col_normalizada for x in ['setor', 'bairro', 'local', 'fator']): mapeamento_colunas[col] = 'Setor_Urbano'
+        if any(x in col_normalizada for x in ['prec', 'val', 'vlr', 'montante']): 
+            mapeamento_colunas[col] = 'Preco'
+            colunas_encontradas.add('Preco')
+        elif any(x in col_normalizada for x in ['are', 'm2', 'm²', 'metrag', 'dimen']): 
+            mapeamento_colunas[col] = 'Area'
+            colunas_encontradas.add('Area')
+        elif any(x in col_normalizada for x in ['quart', 'dorm', 'quar']): 
+            mapeamento_colunas[col] = 'Quartos'
+            colunas_encontradas.add('Quartos')
+        elif any(x in col_normalizada for x in ['vag', 'garag', 'estac']): 
+            mapeamento_colunas[col] = 'Vagas'
+            colunas_encontradas.add('Vagas')
+        elif any(x in col_normalizada for x in ['cons', 'estad', 'vici']): 
+            mapeamento_colunas[col] = 'Conservacao'
+            colunas_encontradas.add('Conservacao')
+        elif any(x in col_normalizada for x in ['setor', 'bairro', 'local', 'fator', 'regia', 'zona']): 
+            mapeamento_colunas[col] = 'Setor_Urbano'
+            colunas_encontradas.add('Setor_Urbano')
 
     df = df.rename(columns=mapeamento_colunas)
-    
-    # Tratamento para evitar colunas duplicadas geradas pelo mapeamento
     df = df.loc[:, ~df.columns.duplicated()]
 
-    colunas_obrigatorias = ['Preco', 'Area', 'Setor_Urbano']
+    # Obrigatoriedades mínimas para rodar uma avaliação técnica
+    colunas_obrigatorias = ['Preco', 'Area']
     
     if not all(c in df.columns for c in colunas_obrigatorias):
-        st.error(f"Não mapeamos as colunas essenciais. Colunas na planilha: {list(df.columns)}")
+        st.error(f"Não mapeamos as colunas essenciais (Preço e Área). Colunas na planilha: {list(df.columns)}")
     else:
-        if 'Quartos' not in df.columns: df['Quartos'] = 2
-        if 'Vagas' not in df.columns: df['Vagas'] = 1
-        if 'Conservacao' not in df.columns: df['Conservacao'] = 2
+        # Definir quais variáveis independentes vão entrar no modelo dinamicamente
+        variaveis_independentes = ['Area']
+        for var in ['Quartos', 'Vagas', 'Conservacao', 'Setor_Urbano']:
+            if var in df.columns:
+                variaveis_independentes.append(var)
 
         def limpar_numero(valor):
             txt = str(valor).strip().replace('R$', '').replace(' ', '')
@@ -64,44 +79,56 @@ if arquivo_upload:
             try: return float(txt)
             except: return np.nan
 
-        # Correção segura contra KeyError
-        for col in ['Preco', 'Area', 'Quartos', 'Vagas', 'Conservacao', 'Setor_Urbano']:
-            if col in df.columns:
-                df[col] = df[col].astype(str).apply(limpar_numero)
+        # Limpar apenas as colunas que mapeamos e existem de facto
+        colunas_para_limpar = ['Preco'] + variaveis_independentes
+        for col in colunas_para_limpar:
+            df[col] = df[col].astype(str).apply(limpar_numero)
+            df[col] = df[col].fillna(df[col].median() if not df[col].isnull().all() else 1.0)
 
-        df['Quartos'] = df['Quartos'].fillna(2)
-        df['Vagas'] = df['Vagas'].fillna(1)
-        df['Conservacao'] = df['Conservacao'].fillna(2)
-        df['Setor_Urbano'] = df['Setor_Urbano'].fillna(1.0)
         df = df.dropna(subset=['Preco', 'Area'])
 
-        # Painel de Controle das Características do Imóvel avaliando
+        # Painel de Controle - Características Dinâmicas
         st.sidebar.header("⚙️ Características do Imóvel")
-        area_avaliando = st.sidebar.number_input("Área Útil (m²)", value=75.0, step=1.0)
-        quartos_avaliando = st.sidebar.slider("Quantidade de Quartos", 1, 5, 2)
-        vagas_avaliando = st.sidebar.slider("Vagas de Garagem", 0, 5, 1)
-        conservacao_avaliando = st.sidebar.selectbox("Estado de Conservação", [1, 2, 3], format_func=lambda x: {1:"Regular", 2:"Bom", 3:"Excelente"}[x])
-        setor_urbano_avaliando = st.sidebar.number_input("Fator de Bairro / Setor Urbano", value=1.0, step=0.1)
+        caracteristicas_avaliando = {}
+        
+        caracteristicas_avaliando['Area'] = st.sidebar.number_input("Área Útil (m²)", value=120.0, step=1.0)
+        
+        if 'Quartos' in variaveis_independentes:
+            caracteristicas_avaliando['Quartos'] = st.sidebar.slider("Quantidade de Quartos", 1, 5, 3)
+        if 'Vagas' in variaveis_independentes:
+            caracteristicas_avaliando['Vagas'] = st.sidebar.slider("Vagas de Garagem", 0, 5, 2)
+        if 'Conservacao' in variaveis_independentes:
+            caracteristicas_avaliando['Conservacao'] = st.sidebar.selectbox("Estado de Conservação", [1, 2, 3], index=1, format_func=lambda x: {1:"Regular", 2:"Bom", 3:"Excelente"}[x])
+        if 'Setor_Urbano' in variaveis_independentes:
+            caracteristicas_avaliando['Setor_Urbano'] = st.sidebar.number_input("Fator de Bairro / Setor Urbano", value=1.0, step=0.1)
 
         if len(df) >= 3:
-            X = df[['Area', 'Quartos', 'Vagas', 'Conservacao', 'Setor_Urbano']]
+            # Construção do modelo dinâmico
+            X = df[variaveis_independentes]
             y = df['Preco']
             modelo = LinearRegression().fit(X, y)
             
-            dados_imovel = np.array([[area_avaliando, quartos_avaliando, vagas_avaliando, conservacao_avaliando, sector_urbano_avaliando if 'sector_urbano_avaliando' in locals() else setor_urbano_avaliando]])
+            # Montar o vetor do avaliando na ordem correta das colunas
+            dados_imovel = np.array([[caracteristicas_avaliando[var] for var in variaveis_independentes]])
+            
             preco_estimado = max(0, modelo.predict(dados_imovel)[0])
             r2_score = modelo.score(X, y)
             limite_inferior, limite_superior = preco_estimado * 0.85, preco_estimado * 1.15
 
+            # Exibição dos Resultados
             c1, c2, c3 = st.columns(3)
             c1.metric("Valor de Mercado Estimado", f"R$ {preco_estimado:,.2f}")
             c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
             c3.metric("Precisão do Modelo (R²)", f"{f'{r2_score*100:.2f}%' if r2_score > 0 else 'N/A'}")
 
+            # Identificar dinamicamente as variáveis usadas para avisar o Engenheiro
+            st.info(f"📐 Modelo calculado com base em: {', '.join(variaveis_independentes)}")
+
+            # Gráfico
             fig, ax = plt.subplots(figsize=(8, 3.5))
             sns.scatterplot(data=df, x='Area', y='Preco', color='#002d62', alpha=0.6, ax=ax, label="Amostras")
-            ax.scatter([area_avaliando], [preco_estimado], color='#d9534f', s=150, marker='*', label="Avaliando")
-            ax.set_title("Modelo de Regressão Linear")
+            ax.scatter([caracteristicas_avaliando['Area']], [preco_estimado], color='#d9534f', s=150, marker='*', label="Avaliando")
+            ax.set_title("Modelo de Regressão Linear Adaptativo")
             ax.grid(True, alpha=0.3)
             st.pyplot(fig)
 
@@ -112,10 +139,14 @@ if arquivo_upload:
             pdf_buf = io.BytesIO()
             doc = SimpleDocTemplate(pdf_buf, pagesize=letter)
             styles = getSampleStyleSheet()
+            
+            detalhes_texto = " | ".join([f"<b>{k}:</b> {v}" for k, v in caracteristicas_avaliando.items()])
             story = [
                 Paragraph("LAUDO DE AVALIAÇÃO TÉCNICA MERCADOLÓGICA", ParagraphStyle('T', fontSize=18, textColor=colors.HexColor('#002d62'), alignment=1)),
                 Spacer(1, 15),
-                Paragraph(f"<b>Área Proposta:</b> {area_avaliando} m² | <b>Quartos:</b> {quartos_avaliando} | <b>Vagas:</b> {vagas_avaliando}<br/><b>Valor de Mercado Inferido: R$ {preco_estimado:,.2f}</b>", styles['Normal']),
+                Paragraph(detalhes_texto, styles['Normal']),
+                Spacer(1, 5),
+                Paragraph(f"<b>Valor de Mercado Inferido: R$ {preco_estimado:,.2f}</b>", styles['Normal']),
                 Spacer(1, 15),
                 Image(img_buf, width=400, height=180)
             ]
