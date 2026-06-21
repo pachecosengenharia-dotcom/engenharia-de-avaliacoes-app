@@ -25,34 +25,47 @@ if arquivo_csv is not None:
     df_clean = df_clean.dropna()
 
     if not df_clean.empty:
-        modelo = LinearRegression().fit(df_clean[features_list], df_clean[col_alvo])
+        X = df_clean[features_list]
+        y = df_clean[col_alvo]
+        modelo = LinearRegression().fit(X, y)
         
-        # --- INPUTS COM VALIDAÇÃO DE LIMITES ---
+        # 1. Equação
+        eq_str = f"V.U. = {modelo.intercept_:.2f} " + " ".join([f"+ ({c:.2f}*{n})" for n, c in zip(features_list, modelo.coef_)])
+        st.subheader("Equação do Modelo")
+        st.latex(eq_str)
+        
+        # 2. Diagnóstico Visual
+        predicoes = modelo.predict(X)
+        residuos = y - predicoes
+        n, p = len(y), len(features_list) + 1
+        X_mat = np.column_stack([np.ones(n), X])
+        leverage = np.diag(X_mat @ np.linalg.inv(X_mat.T @ X_mat) @ X_mat.T)
+        cooks_dist = (residuos**2 / (p * np.var(residuos))) * (leverage / (1 - leverage)**2)
+        
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
+        ax1.scatter(y, predicoes, alpha=0.5); ax1.set_title("Aderência (Obs vs Prev)")
+        ax2.scatter(predicoes, residuos, alpha=0.5, color='orange'); ax2.axhline(0, color='black', linestyle='--'); ax2.set_title("Resíduos")
+        ax3.stem(cooks_dist); ax3.set_title("Distância de Cook")
+        st.pyplot(fig)
+        
+        # 3. Inputs com Validação NBR
         st.sidebar.header("⚙️ Parâmetros do Imóvel")
         inputs = {}
         extrapolou = False
-        
         for f in features_list:
             min_val, max_val = df_clean[f].min(), df_clean[f].max()
-            val = st.sidebar.number_input(f"{f} (Limites: {min_val:.1f} a {max_val:.1f})", 
-                                          value=float(df_clean[f].median()))
+            val = st.sidebar.number_input(f"{f} (Limites: {min_val:.1f} a {max_val:.1f})", value=float(df_clean[f].median()))
             inputs[f] = val
-            
-            # Verificação de extrapolação conforme NBR 14653
             if val < min_val or val > max_val:
                 st.sidebar.warning(f"⚠️ Extrapolação em {f}!")
                 extrapolou = True
         
+        # 4. Cálculo e Resultados
         if st.sidebar.button("Calcular Precificação"):
             if extrapolou:
-                st.error("Atenção: O modelo não pode ser utilizado com segurança, pois existem variáveis fora dos limites amostrais da NBR 14653.")
+                st.error("Erro: Parâmetros fora dos limites amostrais da NBR 14653.")
             else:
-                # Predição
-                input_array = np.array([inputs[f] for f in features_list]).reshape(1, -1)
-                pred_unit = modelo.predict(input_array)[0]
-                
-                # Intervalo e Total
-                residuos = df_clean[col_alvo] - modelo.predict(df_clean[features_list])
+                pred_unit = modelo.predict(np.array([list(inputs.values())]))[0]
                 erro_padrao = np.std(residuos)
                 area = inputs.get('Área Privativa', 1)
                 
@@ -60,6 +73,8 @@ if arquivo_csv is not None:
                 col1.metric("V.U. Mínimo", f"R$ {pred_unit - (1.96 * erro_padrao):,.2f}")
                 col2.metric("V.U. Médio", f"R$ {pred_unit:,.2f}")
                 col3.metric("V.U. Máximo", f"R$ {pred_unit + (1.96 * erro_padrao):,.2f}")
+                
                 st.write(f"### Valor Total Estimado: R$ {pred_unit * area:,.2f}")
+                st.write(f"Intervalo Total: R$ {(pred_unit - (1.96 * erro_padrao))*area:,.2f} a R$ {(pred_unit + (1.96 * erro_padrao))*area:,.2f}")
     else:
-        st.error("Erro na leitura dos dados.")
+        st.error("Dados insuficientes.")
