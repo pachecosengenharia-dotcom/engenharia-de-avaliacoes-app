@@ -2,45 +2,67 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
 import io
-import matplotlib.pyplot as plt
 
-# [Configuração do App e Leitura de dados conforme anterior...]
-# ... (manter a leitura e limpeza de dados que já funciona)
+st.set_page_config(layout="wide")
+st.title("📊 Engenharia de Avaliações - Goiânia")
 
-# 1. Obter Equação da Regressão
-coefs = dict(zip(X.columns, modelo.coef_))
-equacao = f"V.U. = {modelo.intercept_:.2f} "
-for var, coef in coefs.items():
-    equacao += f"+ ({coef:.2f} * {var}) "
+try:
+    # 1. Leitura do arquivo
+    df = pd.read_csv("Goiânia - GO.csv", sep=";", encoding='latin-1')
+    df.columns = [c.strip() for c in df.columns]
 
-st.subheader("Equação da Regressão")
-st.latex(equacao)
+    # 2. Mapeamento Automático
+    def encontrar_coluna(lista_possiveis):
+        for nome in lista_possiveis:
+            if nome in df.columns: return nome
+        return None
 
-# 2. Gerar PDF
-def gerar_pdf():
-    buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=A4)
-    c.drawString(100, 800, "Laudo Técnico de Avaliação Imobiliária")
-    c.drawString(100, 780, f"Equação: {equacao}")
+    col_alvo = encontrar_coluna(['Valor Unitário', 'Valor Unitario'])
+    # Adicionamos todas as colunas possíveis de entrada
+    colunas_entrada = [
+        'Área Construída', 'Area Construida', 'Área Privativa', 'Area Privativa',
+        'Área do Terreno', 'Area do Terreno', 'Evento', 'Padrão de Acabamento', 
+        'Estado de Conservação', 'Setor urbano', 'Data do Evento', 'Quartos', 'Suite'
+    ]
     
-    # Adicionar lista de dados ao PDF
-    text = c.beginText(100, 750)
-    text.textLines(df_modelo.head(10).to_string()) # Primeiros 10 dados
-    c.drawText(text)
+    # 3. Processamento Limpo
+    df_modelo = pd.DataFrame()
+    if col_alvo:
+        df_modelo[col_alvo] = pd.to_numeric(df[col_alvo].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
     
-    c.save()
-    buffer.seek(0)
-    return buffer
+    features = []
+    for col in colunas_entrada:
+        if col in df.columns and col != col_alvo:
+            df_modelo[col] = pd.to_numeric(df[col].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
+            features.append(col)
+    
+    df_modelo = df_modelo.dropna()
 
-# 3. Botão de Download do PDF
-pdf_data = gerar_pdf()
-st.download_button("📥 Baixar Laudo em PDF", data=pdf_data, file_name="laudo_avaliacao.pdf")
+    if len(df_modelo) > 0:
+        # 4. Regressão
+        X = df_modelo[features]
+        y = df_modelo[col_alvo]
+        modelo = LinearRegression().fit(X, y)
+        
+        # 5. Interface
+        st.sidebar.header("⚙️ Parâmetros do Imóvel")
+        inputs = {}
+        for col in features:
+            inputs[col] = st.sidebar.number_input(f"{col}", value=float(df_modelo[col].median()))
+        
+        pred_unit = modelo.predict([list(inputs.values())])[0]
+        area_ref = inputs.get('Área Construída') or inputs.get('Area Construida') or inputs.get('Área Privativa') or inputs.get('Area Privativa') or 1
+        pred_total = pred_unit * area_ref
+        
+        col1, col2 = st.columns(2)
+        col1.metric("Valor Unitário Estimado", f"R$ {pred_unit:,.2f} / m²")
+        col2.metric("Valor Total Estimado", f"R$ {pred_total:,.2f}")
+        
+        st.success("Modelo treinado com sucesso!")
+        st.dataframe(df_modelo)
+    else:
+        st.error("Não foram encontrados dados válidos. Verifique se o seu CSV possui as colunas necessárias.")
 
-# 4. Exibir Dados e Gráficos no App
-st.subheader("Lista de Dados Utilizados")
-st.dataframe(df_modelo)
-
-st.subheader("Diagnóstico de Aderência")
+except Exception as e:
+    st.error(f"Erro: {e}")
