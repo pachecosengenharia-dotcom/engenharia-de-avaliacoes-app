@@ -33,18 +33,18 @@ if arquivo_upload:
     # Limpeza simples e segura das colunas (remove espaços nas pontas)
     df.columns = df.columns.astype(str).str.strip()
 
-    # Dicionário de padronização estrita de colunas
+    # Dicionário calibrado EXATAMENTE com os cabeçalhos reais da sua planilha
     colunas_possiveis = {
-        'Preco': ['Preco', 'Preço', 'Valor', 'Vlr', 'PRECO', 'PREÇO'],
-        'Area_Construida': ['Area_Construida', 'Área_Construída', 'Area Construida', 'Área Construída', 'Area Const', 'Área Const', 'AREA_CONSTRUIDA'],
-        'Area_Terreno': ['Area_Terreno', 'Área_Terreno', 'Area Terreno', 'Terreno', 'AREA_TERRENO'],
+        'Preco': ['Preco', 'Preço', 'Valor', 'Vlr', 'PRECO', 'PREÇO', 'Valor Total', 'Valor_Total'],
+        'Area_Construida': ['Area_Construida', 'Área_Construída', 'Area Construida', 'Área Construída', 'Area Const', 'Área Const', 'AREA_CONSTRUIDA', 'Área Privativa', 'Area Privativa'],
+        'Area_Terreno': ['Area_Terreno', 'Área_Terreno', 'Area Terreno', 'Terreno', 'AREA_TERRENO', 'Área do Terreno', 'Area do Terreno'],
         'Quartos': ['Quartos', 'Dormitorios', 'Dormitórios', 'QUARTOS'],
-        'Suites': ['Suites', 'Suítes', 'SUITES'],
+        'Suites': ['Suites', 'Suítes', 'SUITES', 'Suite', 'Suíte'],
         'Vagas': ['Vagas', 'Garagem', 'VAGAS'],
-        'Conservacao': ['Conservacao', 'Conservação', 'CONSERVACAO'],
-        'Padrao_Acabamento': ['Padrao_Acabamento', 'Padrão_Acabamento', 'Padrao', 'Padrão', 'Acabamento', 'PADRAO'],
-        'Setor_Urbano': ['Setor_Urbano', 'Setor Urbano', 'Setor', 'SETOR', 'SETOR_URBANO'],
-        'Data_Evento': ['Data_Evento', 'Data Evento', 'Data', 'DATA'],
+        'Conservacao': ['Conservacao', 'Conservação', 'CONSERVACAO', 'Estado de Conservação', 'Estado de Conservacao'],
+        'Padrao_Acabamento': ['Padrao_Acabamento', 'Padrão_Acabamento', 'Padrao', 'Padrão', 'Acabamento', 'PADRAO', 'Padrão de Acabamento', 'Padrao de Acabamento'],
+        'Setor_Urbano': ['Setor_Urbano', 'Setor Urbano', 'Setor', 'SETOR', 'SETOR_URBANO', 'Setor urbano'],
+        'Data_Evento': ['Data_Evento', 'Data Evento', 'Data', 'DATA', 'Data do Evento'],
         'Evento': ['Evento', 'EVENTO']
     }
 
@@ -122,7 +122,6 @@ if arquivo_upload:
             caracteristicas_avaliando['Evento'] = st.sidebar.number_input("Fator de Evento", value=1.0, step=0.05)
 
         if len(df) >= 2:
-            # Seleção de variáveis estável
             X = df[variaveis_independentes]
             y = df['Preco']
             
@@ -139,45 +138,3 @@ if arquivo_upload:
 
             # Exibição dos Resultados
             c1, c2, c3 = st.columns(3)
-            c1.metric("Valor de Mercado Estimado", f"R$ {preco_estimado:,.2f}")
-            c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
-            c3.metric("Precisão do Modelo (R²)", f"{f'{r2_score*100:.2f}%' if r2_score > 0 else 'N/A'}")
-
-            st.info(f"📐 **Variáveis processadas no cálculo multifatorial:** {', '.join(variaveis_independentes)}")
-
-            # Gráfico
-            fig, ax = plt.subplots(figsize=(8, 3.5))
-            sns.scatterplot(data=df, x='Area_Construida', y='Preco', color='#002d62', alpha=0.6, ax=ax, label="Amostras de Mercado")
-            ax.scatter([caracteristicas_avaliando['Area_Construida']], [preco_estimado], color='#d9534f', s=150, marker='*', label="Imóvel Avaliando")
-            ax.set_title("Gráfico de Dispersão - Engenharia de Avaliações")
-            ax.grid(True, alpha=0.3)
-            st.pyplot(fig)
-
-            # Relatório PDF
-            img_buf = io.BytesIO()
-            fig.savefig(img_buf, format='png', dpi=200)
-            img_buf.seek(0)
-            
-            pdf_buf = io.BytesIO()
-            doc = SimpleDocTemplate(pdf_buf, pagesize=letter)
-            styles = getSampleStyleSheet()
-            
-            detalhes_texto = " | ".join([f"<b>{k}:</b> {v}" for k, v in caracteristicas_avaliando.items()])
-            story = [
-                Paragraph("LAUDO DE AVALIAÇÃO TÉCNICA MERCADOLÓGICA", ParagraphStyle('T', fontSize=18, textColor=colors.HexColor('#002d62'), alignment=1)),
-                Spacer(1, 15),
-                Paragraph(detalhes_texto, styles['Normal']),
-                Spacer(1, 5),
-                Paragraph(f"<b>Valor de Mercado Inferido: R$ {preco_estimado:,.2f}</b>", styles['Normal']),
-                Spacer(1, 15),
-                Image(img_buf, width=400, height=180)
-            ]
-            doc.build(story)
-            pdf_buf.seek(0)
-
-            st.sidebar.markdown("---")
-            st.sidebar.download_button(label="📥 Baixar Laudo Oficial (PDF)", data=pdf_buf, file_name="Laudo_Tecnico_Profissional.pdf", mime="application/pdf")
-        else:
-            st.warning(f"Amostras insuficientes após tratamento. Linhas válidas na planilha: {len(df)}.")
-else:
-    st.info("💡 Por favor, faça o upload de uma planilha .csv na barra lateral para iniciar.")
