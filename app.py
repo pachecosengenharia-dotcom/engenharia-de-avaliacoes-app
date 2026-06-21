@@ -11,7 +11,6 @@ from reportlab.pdfgen import canvas
 st.set_page_config(layout="wide")
 st.title("📊 Engenharia de Avaliações - Laudo Técnico")
 
-# Lista ficheiros CSV
 arquivos = [f for f in os.listdir('.') if f.endswith('.csv')]
 regiao = st.sidebar.selectbox("Selecione a Região:", arquivos)
 
@@ -31,46 +30,39 @@ def gerar_pdf(regiao, pred_unit, minimo, maximo, eq_str, features, n_amostras):
 
 if regiao:
     try:
-        # Lê o CSV
         df = pd.read_csv(regiao, sep=";", encoding='latin-1')
         df.columns = df.columns.str.strip()
         
-        # DEBUG: Mostra o que o sistema leu
-        st.write("Colunas encontradas:", df.columns.tolist())
-        
         col_alvo = "Valor Unitário"
-        if col_alvo not in df.columns:
-            st.error(f"Coluna '{col_alvo}' não encontrada. Verifique o CSV.")
-        else:
-            # Seleção automática
-            features = [c for c in df.columns if c != col_alvo and c not in ['Idade Aparente', 'Endereço', 'Complemento', 'Bairro', 'Informante', 'Telefone', 'Data do Evento']]
-            
-            # Converte para numérico
-            df_modelo = df[features + [col_alvo]].apply(lambda x: pd.to_numeric(x.astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce'))
-            df_modelo = df_modelo.dropna()
+        
+        # Filtro de variáveis (sem mostrar no app)
+        excluir = ['Idade Aparente', 'Endereço', 'Complemento', 'Bairro', 'Informante', 'Telefone', 'Data do Evento']
+        features = [c for c in df.columns if c != col_alvo and c not in excluir]
+        if 'Setor Urbano' not in features: features.append('Setor Urbano')
+        
+        df_modelo = df[features + [col_alvo]].apply(lambda x: pd.to_numeric(x.astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce'))
+        df_modelo = df_modelo.dropna()
 
-            if not df_modelo.empty:
-                X, y = df_modelo[features], df_modelo[col_alvo]
-                modelo = LinearRegression().fit(X, y)
-                
-                eq_str = f"VU = {modelo.intercept_:.2f}"
-                st.latex(eq_str)
-                
-                st.sidebar.header("⚙️ Parâmetros")
-                inputs = [st.sidebar.number_input(f"{n}", value=float(df_modelo[n].median())) for n in features]
-                pred_unit = modelo.predict([inputs])[0]
-                
-                minimo, maximo = pred_unit * 0.90, pred_unit * 1.10
-                
-                c1, c2, c3 = st.columns(3)
-                c1.metric("V.U. Mínimo", f"R$ {minimo:,.2f}")
-                c2.metric("V.U. Médio", f"R$ {pred_unit:,.2f}")
-                c3.metric("V.U. Máximo", f"R$ {maximo:,.2f}")
-                
-                # PDF
-                pdf_data = gerar_pdf(regiao, pred_unit, minimo, maximo, eq_str, features, len(df_modelo))
-                st.download_button("📥 Baixar Laudo PDF", data=pdf_data, file_name="laudo.pdf", mime="application/pdf")
-            else:
-                st.error("Dados insuficientes após limpeza.")
-    except Exception as e:
-        st.error(f"Erro: {e}")
+        if not df_modelo.empty:
+            X, y = df_modelo[features], df_modelo[col_alvo]
+            modelo = LinearRegression().fit(X, y)
+            
+            # Equação no Laudo
+            eq_str = f"VU = {modelo.intercept_:.2f}"
+            
+            st.sidebar.header("⚙️ Parâmetros do Imóvel")
+            inputs = [st.sidebar.number_input(f"{n}", value=float(df_modelo[n].median())) for n in features]
+            pred_unit = modelo.predict([inputs])[0]
+            
+            residuos = y - modelo.predict(X)
+            minimo, maximo = pred_unit * 0.90, pred_unit * 1.10
+            
+            # Layout dos resultados
+            c1, c2, c3 = st.columns(3)
+            c1.metric("V.U. Mínimo", f"R$ {minimo:,.2f}")
+            c2.metric("V.U. Médio", f"R$ {pred_unit:,.2f}")
+            c3.metric("V.U. Máximo", f"R$ {maximo:,.2f}")
+            
+            # Gráficos
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+            ax1.scatter(y, modelo.predict(X), alpha=0.5); ax1.set_title("Aderência
