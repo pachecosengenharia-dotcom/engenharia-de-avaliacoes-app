@@ -65,7 +65,7 @@ if arquivo_upload:
     if 'Preco' not in df.columns or 'Area_Construida' not in df.columns:
         st.error(f"Não mapeamos as colunas essenciais (Preço e Área Construída). Colunas identificadas na sua planilha: {list(df.columns)}")
     else:
-        # Tratamento inteligente de variáveis categóricas/texto (ex: Alto, Médio, Baixo)
+        # Tratamento de variáveis categóricas/texto (Padrão de Acabamento)
         if 'Padrao_Acabamento' in df.columns:
             df['Padrao_Acabamento'] = df['Padrao_Acabamento'].astype(str).str.lower()
             df['Padrao_Acabamento'] = df['Padrao_Acabamento'].map({'alto': 3, 'luxo': 3, 'medio': 2, 'médio': 2, 'normal': 2, 'baixo': 1, 'economico': 1, 'econômico': 1}).fillna(2)
@@ -73,7 +73,6 @@ if arquivo_upload:
         def limpar_numero(valor):
             txt = str(valor).strip().replace('R$', '').replace(' ', '')
             if not txt or txt.lower() in ['nan', 'null', '']: return np.nan
-            # Se for formato de data (ex: 10/2025), pega apenas o ano ou mês numérico
             if '/' in txt:
                 partes = txt.split('/')
                 try: return float(partes[-1])
@@ -87,12 +86,36 @@ if arquivo_upload:
         todas_variaveis = ['Area_Construida', 'Area_Terreno', 'Quartos', 'Suites', 'Vagas', 'Conservacao', 'Padrao_Acabamento', 'Setor_Urbano', 'Data_Evento', 'Evento']
         variaveis_independentes = [v for v in todas_variaveis if v in df.columns]
 
-        # Limpar os dados numericamente sem descartar linhas de forma agressiva
+        # Limpar os dados estritamente numéricos
         df['Preco'] = df['Preco'].astype(str).apply(limpar_numero)
         for col in variaveis_independentes:
-            if col != 'Padrao_Acabamento': # Já tratado acima
+            if col != 'Padrao_Acabamento' and col != 'Setor_Urbano':
                 df[col] = df[col].astype(str).apply(limpar_numero)
-            df[col] = df[col].fillna(df[col].median() if not df[col].isnull().all() else 1.0)
+                df[col] = df[col].fillna(df[col].median() if not df[col].isnull().all() else 1.0)
+
+        # TRATAMENTO ESPECIAL PARA SETOR_URBANO (Aceita texto ou número)
+        if 'Setor_Urbano' in df.columns:
+            # Força remoção de espaços e padroniza texto
+            df['Setor_Urbano'] = df['Setor_Urbano'].astype(str).str.strip()
+            
+            # Se for uma planilha com nomes de setores (texto), calcula o impacto pelo preço médio por m² do setor
+            df['preco_m2_temp'] = df['Preco'] / df['Area_Construida']
+            peso_setores = df.groupby('Setor_Urbano')['preco_m2_temp'].mean().to_dict()
+            df['Setor_Urbano_Numerico'] = df['Setor_Urbano'].map(peso_setores)
+            
+            # Caso a coluna já fosse numérica originalmente, mantém os valores originais se a conversão direta der certo
+            try:
+                valores_diretos = pd.to_numeric(df['Setor_Urbano'], errors='coerce')
+                if not valores_diretos.isnull().all():
+                    df['Setor_Urbano_Numerico'] = valores_diretos.fillna(df['Setor_Urbano_Numerico'])
+            except:
+                pass
+                
+            df['Setor_Urbano_Numerico'] = df['Setor_Urbano_Numerico'].fillna(df['Setor_Urbano_Numerico'].median() if not df['Setor_Urbano_Numerico'].isnull().all() else 1.0)
+            
+            # Substitui a variável estatística interna
+            idx_setor = variaveis_independentes.index('Setor_Urbano')
+            variaveis_independentes[idx_setor] = 'Setor_Urbano_Numerico'
 
         df = df.dropna(subset=['Preco', 'Area_Construida'])
 
@@ -114,15 +137,21 @@ if arquivo_upload:
             caracteristicas_avaliando['Conservacao'] = st.sidebar.selectbox("Estado de Conservação (Nota)", [1, 2, 3], index=1, format_func=lambda x: {1:"Regular", 2:"Bom", 3:"Excelente"}[x])
         if 'Padrao_Acabamento' in variaveis_independentes:
             caracteristicas_avaliando['Padrao_Acabamento'] = st.sidebar.selectbox("Padrão de Acabamento", [1, 2, 3], index=1, format_func=lambda x: {1:"Baixo / Econômico", 2:"Médio / Normal", 3:"Alto / Luxo"}[x])
-        if 'Setor_Urbano' in variaveis_independentes:
-            caracteristicas_avaliando['Setor_Urbano'] = st.sidebar.number_input("Setor_Urbano", value=1.0, step=0.1)
+        
+        # Input Inteligente de Setor Urbano na interface
+        if 'Setor_Urbano_Numerico' in variaveis_independentes:
+            lista_setores = sorted(list(df['Setor_Urbano'].unique()))
+            setor_selecionado = st.sidebar.selectbox("Setor_Urbano (Selecione o Bairro)", lista_setores)
+            # Resgata o peso numérico correspondente calculado para o cálculo matemático
+            caracteristicas_avaliando['Setor_Urbano_Numerico'] = df[df['Setor_Urbano'] == setor_selecionado]['Setor_Urbano_Numerico'].values[0]
+
         if 'Data_Evento' in variaveis_independentes:
-            caracteristicas_avaliando['Data_Evento'] = st.sidebar.number_input("Data do Evento (Ano ou Mês numérico)", value=2026.0, step=1.0)
+            caracteristicas_avaliando['Data_Evento'] = st.sidebar.number_input("Data do Evento (Ano ou Mês)", value=2026.0, step=1.0)
         if 'Evento' in variaveis_independentes:
             caracteristicas_avaliando['Evento'] = st.sidebar.number_input("Fator de Evento (Venda=1.0 / Oferta=0.9)", value=1.0, step=0.05)
 
         if len(df) >= len(variaveis_independentes) + 1:
-            # Processamento da Regressão Linear
+            # Processamento da Regressão Linear Múltipla
             X = df[variaveis_independentes]
             y = df['Preco']
             modelo = LinearRegression().fit(X, y)
@@ -138,7 +167,9 @@ if arquivo_upload:
             c2.metric("Intervalo Admissível (Mín/Máx)", f"R$ {limite_inferior:,.2f} a R$ {limite_superior:,.2f}")
             c3.metric("Precisão do Modelo (R²)", f"{f'{r2_score*100:.2f}%' if r2_score > 0 else 'N/A'}")
 
-            st.info(f"📐 **Variáveis processadas no cálculo multifatorial:** {', '.join(variaveis_independentes)}")
+            # Mostrar variáveis ativas renomeando o termo estatístico interno de volta para o profissional
+            exibir_vars = [v.replace('Setor_Urbano_Numerico', 'Setor_Urbano') for v in variaveis_independentes]
+            st.info(f"📐 **Variáveis processadas no cálculo multifatorial:** {', '.join(exibir_vars)}")
 
             # Gráfico
             fig, ax = plt.subplots(figsize=(8, 3.5))
@@ -157,7 +188,10 @@ if arquivo_upload:
             doc = SimpleDocTemplate(pdf_buf, pagesize=letter)
             styles = getSampleStyleSheet()
             
-            detalhes_texto = " | ".join([f"<b>{k}:</b> {v}" for k, v in caracteristicas_avaliando.items()])
+            # Formatar detalhes para o laudo
+            detalhes_exibicao = {k.replace('Setor_Urbano_Numerico', 'Setor_Urbano'): (setor_selecionado if k == 'Setor_Urbano_Numerico' else v) for k, v in caracteristicas_avaliando.items()}
+            detalhes_texto = " | ".join([f"<b>{k}:</b> {v}" for k, v in detalhes_exibicao.items()])
+            
             story = [
                 Paragraph("LAUDO DE AVALIAÇÃO TÉCNICA MERCADOLÓGICA", ParagraphStyle('T', fontSize=18, textColor=colors.HexColor('#002d62'), alignment=1)),
                 Spacer(1, 15),
