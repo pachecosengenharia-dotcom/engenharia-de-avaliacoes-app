@@ -2,47 +2,64 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-st.title("📊 Engenharia de Avaliações - Goiânia")
+st.set_page_config(layout="wide")
+st.title("📊 Engenharia de Avaliações - Modelo de Valor Unitário")
 
 try:
     # 1. Leitura
     df = pd.read_csv("Goiânia - GO.csv", sep=";", encoding='latin-1')
     df.columns = [c.strip() for c in df.columns]
+
+    # 2. Definição explícita do alvo
+    # O sistema agora foca no Valor Unitário como dependente
+    col_alvo = 'Valor Unitário' 
     
-    # 2. Identificar e Limpar colunas
-    # Transformamos tudo o que for numérico e descartamos o que for texto puro (endereços)
+    # Função de limpeza para converter tudo em float
+    def limpar_num(val):
+        s = str(val).replace('R$', '').replace('.', '').replace(',', '.')
+        try: return float(s)
+        except: return np.nan
+
+    # 3. Processamento de dados
     df_limpo = pd.DataFrame()
-    col_alvo = 'Valor Total'
-    
     for col in df.columns:
-        # Converter para numérico, tratando vírgulas e pontos
-        col_convertida = pd.to_numeric(df[col].astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False), errors='coerce')
-        
-        # Manter se for o alvo ou se tiver dados numéricos válidos
-        if col == col_alvo or col_convertida.notna().sum() > (len(df) * 0.8):
-            df_limpo[col] = col_convertida
+        if col == col_alvo:
+            df_limpo[col] = df[col].apply(limpar_num)
+        elif df[col].dtype == 'object':
+            conv = df[col].apply(limpar_num)
+            if conv.notna().sum() > (len(df) * 0.7):
+                df_limpo[col] = conv
+        else:
+            df_limpo[col] = df[col]
 
     df_limpo = df_limpo.dropna()
-    
-    st.write("Variáveis independentes detectadas:", [c for c in df_limpo.columns if c != col_alvo])
-    st.write("Linhas válidas para o treino:", len(df_limpo))
 
-    # 3. Regressão (Separando o Alvo)
+    # 4. Regressão
     X = df_limpo.drop(columns=[col_alvo])
     y = df_limpo[col_alvo]
-    
     modelo = LinearRegression().fit(X, y)
-    
-    # 4. Interface
+
+    # 5. Interface
     st.sidebar.header("⚙️ Parâmetros do Imóvel")
     inputs = {}
     for col in X.columns:
         inputs[col] = st.sidebar.number_input(f"{col}", value=float(df_limpo[col].median()))
 
-    # 5. Predição
+    # 6. Predição
     pred = modelo.predict([list(inputs.values())])
-    st.metric("Valor Total Estimado", f"R$ {pred[0]:,.2f}")
+    st.metric("Valor Unitário Estimado", f"R$ {pred[0]:,.2f} / m²")
+
+    # 7. Diagnóstico Visual
+    st.subheader("📈 Diagnóstico de Aderência")
+    y_pred = modelo.predict(X)
+    fig, ax = plt.subplots(figsize=(8, 4))
+    sns.regplot(x=y_pred, y=y, scatter_kws={'alpha':0.3}, line_kws={'color':'red'})
+    ax.set_xlabel("Estimado")
+    ax.set_ylabel("Real")
+    st.pyplot(fig)
 
 except Exception as e:
-    st.error(f"Erro na execução: {e}")
+    st.error(f"Erro na reconfiguração do modelo: {e}")
