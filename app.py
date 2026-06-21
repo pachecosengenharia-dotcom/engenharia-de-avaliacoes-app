@@ -11,6 +11,7 @@ from reportlab.lib.utils import ImageReader
 st.set_page_config(layout="wide")
 st.title("📊 AVM - Engenharia de Avaliações")
 
+# Função de PDF corrigida e unificada
 def gerar_laudo_pdf(d, fig, eq_str, inputs):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
@@ -23,11 +24,14 @@ def gerar_laudo_pdf(d, fig, eq_str, inputs):
     fig.savefig(img_buf, format='png')
     img_buf.seek(0)
     c.drawImage(ImageReader(img_buf), 50, 400, width=400, height=200)
-    c.save(); buffer.seek(0)
+    c.save()
+    buffer.seek(0)
     return buffer
 
-arquivo = st.sidebar.file_uploader("Carregar CSV", type=["csv", "txt"])
+# Carregamento robusto de arquivos
+arquivo = st.sidebar.file_uploader("Carregar Base (CSV)", type=["csv", "txt"])
 if arquivo:
+    # Detecta automaticamente o separador (; ou ,)
     raw_data = arquivo.getvalue().decode('latin-1')
     sep = ';' if raw_data.count(';') > raw_data.count(',') else ','
     df = pd.read_csv(io.StringIO(raw_data), sep=sep)
@@ -45,7 +49,6 @@ if arquivo:
 
         if not df_c.empty:
             modelo = LinearRegression().fit(df_c[features], df_c[target])
-            # Equação
             eq_str = f"{target} = {modelo.intercept_:.2f} " + " ".join([f"+ ({c:.2f}*{n})" for n, c in zip(features, modelo.coef_)])
             st.latex(eq_str)
             
@@ -56,8 +59,8 @@ if arquivo:
             ax2.scatter(preds, df_c[target] - preds); ax2.axhline(0, color='red'); ax2.set_title("Resíduos")
             st.pyplot(fig)
 
-            # Parâmetros e Limites NBR
-            st.sidebar.header("⚙️ Parâmetros (Limites)")
+            # Parâmetros
+            st.sidebar.header("⚙️ Parâmetros")
             inputs = {f: st.sidebar.number_input(f"{f} ({df_c[f].min():.1f} a {df_c[f].max():.1f})", value=float(df_c[f].median())) for f in features}
             
             if st.sidebar.button("Calcular Precificação"):
@@ -74,4 +77,5 @@ if arquivo:
                 c3.metric("V.U. Máximo", f"R$ {max_v:,.2f}")
                 st.metric("Valor Total Estimado", f"R$ {total:,.2f}")
                 
-                pdf = gerar_laudo_pdf({'vu': vu, 'min': min_v, 'max':
+                pdf = gerar_laudo_pdf({'vu': vu, 'min': min_v, 'max': max_v, 'total': total}, fig, eq_str, inputs)
+                st.download_button("📥 Baixar Laudo", pdf, "laudo.pdf")
