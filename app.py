@@ -17,11 +17,11 @@ try:
             if nome in df.columns: return nome
         return None
 
-    alvo = encontrar_coluna(['Valor Unitário', 'Valor Unitario'])
-    area_construida = encontrar_coluna(['Área Construída', 'Area Construida', 'Área Privativa', 'Area Privativa'])
+    alvo_unit = encontrar_coluna(['Valor Unitário', 'Valor Unitario'])
+    area = encontrar_coluna(['Área Construída', 'Area Construida', 'Área Privativa', 'Area Privativa'])
     
     features_base = [
-        area_construida, 'Área do Terreno', 'Evento', 
+        area, 'Área do Terreno', 'Evento', 
         'Padrão de Acabamento', 'Estado de Conservação', 
         'Setor urbano', 'Data do Evento', 'Quartos', 'Suite'
     ]
@@ -29,17 +29,18 @@ try:
 
     # 3. Limpeza
     df_modelo = pd.DataFrame()
-    df_modelo[alvo] = pd.to_numeric(df[alvo].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
+    df_modelo[alvo_unit] = pd.to_numeric(df[alvo_unit].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
+    df_modelo[area] = pd.to_numeric(df[area].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
     
     for col in features:
-        if col in df.columns:
+        if col in df.columns and col != area:
             df_modelo[col] = pd.to_numeric(df[col].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
     
     df_modelo = df_modelo.dropna()
     
     # 4. Regressão
-    X = df_modelo.drop(columns=[alvo])
-    y = df_modelo[alvo]
+    X = df_modelo.drop(columns=[alvo_unit])
+    y = df_modelo[alvo_unit]
     modelo = LinearRegression().fit(X, y)
     
     # 5. Interface
@@ -48,8 +49,13 @@ try:
     for col in X.columns:
         inputs[col] = st.sidebar.number_input(f"{col}", value=float(df_modelo[col].median()))
     
-    pred = modelo.predict([list(inputs.values())])
-    st.metric("Valor Unitário Estimado", f"R$ {pred[0]:,.2f} / m²")
+    # 6. Cálculo e Exibição
+    pred_unit = modelo.predict([list(inputs.values())])[0]
+    pred_total = pred_unit * inputs[area] # Cálculo do Valor Total baseado na área
+    
+    col1, col2 = st.columns(2)
+    col1.metric("Valor Unitário Estimado", f"R$ {pred_unit:,.2f} / m²")
+    col2.metric("Valor Total Estimado", f"R$ {pred_total:,.2f}")
     
 except Exception as e:
     st.error(f"Erro: {e}")
