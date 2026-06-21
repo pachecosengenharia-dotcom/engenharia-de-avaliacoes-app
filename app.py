@@ -2,43 +2,56 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LinearRegression
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
 import matplotlib.pyplot as plt
-import io
 
-# [Lógica de processamento e Regressão mantida do passo anterior]
-# ... (após calcular pred_unit, pred_total, minimo, maximo e modelo)
+st.set_page_config(layout="wide")
+st.title("📊 Engenharia de Avaliações - Goiânia")
 
-# Gerador de PDF
-def gerar_pdf(pred_unit, pred_total, minimo, maximo, equacao):
-    buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=A4)
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(100, 800, "Laudo Técnico de Avaliação Imobiliária")
+# Bloco único de processamento
+try:
+    # 1. Leitura
+    df = pd.read_csv("Goiânia - GO.csv", sep=";", encoding='latin-1')
+    df.columns = [c.strip() for c in df.columns]
+
+    # 2. Definição das colunas
+    # Nota: Ajuste os nomes abaixo se necessário para coincidir exatamente com seu CSV
+    col_alvo = 'Valor Unitário'
+    features = ['Área Construída', 'Área do Terreno', 'Evento', 'Padrão de Acabamento', 
+                'Estado de Conservação', 'Setor urbano', 'Data do Evento', 'Quartos', 'Suítes']
     
-    c.setFont("Helvetica", 12)
-    c.drawString(100, 770, f"Valor Unitário Estimado: R$ {pred_unit:,.2f} / m²")
-    c.drawString(100, 755, f"Intervalo de Confiança (95%): R$ {minimo:,.2f} a R$ {maximo:,.2f}")
-    c.drawString(100, 740, f"Valor Total Estimado: R$ {pred_total:,.2f}")
+    # 3. Limpeza
+    df_modelo = pd.DataFrame()
+    if col_alvo in df.columns:
+        df_modelo[col_alvo] = pd.to_numeric(df[col_alvo].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
     
-    c.drawString(100, 710, "Equação da Regressão:")
-    c.drawString(100, 695, equacao)
+    for col in features:
+        if col in df.columns:
+            df_modelo[col] = pd.to_numeric(df[col].astype(str).str.replace('.', '').str.replace(',', '.'), errors='coerce')
     
-    c.save()
-    buffer.seek(0)
-    return buffer
+    df_modelo = df_modelo.dropna()
 
-# Botão de download
-if st.button("📥 Gerar Laudo PDF"):
-    pdf = gerar_pdf(pred_unit, pred_total, minimo, maximo, equacao)
-    st.download_button("Baixar PDF", data=pdf, file_name="laudo_tecnico.pdf")
+    # 4. Só executa cálculos se houver dados
+    if not df_modelo.empty:
+        X = df_modelo.drop(columns=[col_alvo])
+        y = df_modelo[col_alvo]
+        modelo = LinearRegression().fit(X, y)
+        
+        # Interface
+        st.sidebar.header("⚙️ Parâmetros")
+        inputs = [st.sidebar.number_input(f"{col}", value=float(df_modelo[col].median())) for col in X.columns]
+        
+        pred_unit = modelo.predict([inputs])[0]
+        st.metric("Valor Unitário Estimado", f"R$ {pred_unit:,.2f} / m²")
+        
+        # Gráfico de Aderência
+        st.subheader("Análise de Aderência")
+        fig, ax = plt.subplots()
+        ax.scatter(y, modelo.predict(X), alpha=0.5)
+        ax.plot([y.min(), y.max()], [y.min(), y.max()], 'r--')
+        st.pyplot(fig)
+        
+    else:
+        st.error("Dados insuficientes. Verifique se as colunas estão preenchidas corretamente no CSV.")
 
-# Gráficos
-st.subheader("Análise de Aderência")
-fig, ax = plt.subplots()
-ax.scatter(y, modelo.predict(X), alpha=0.5)
-ax.plot([y.min(), y.max()], [y.min(), y.max()], 'r--')
-ax.set_xlabel("Valores Reais")
-ax.set_ylabel("Valores Estimados")
-st.pyplot(fig)
+except Exception as e:
+    st.error(f"Erro ao processar: {e}")
